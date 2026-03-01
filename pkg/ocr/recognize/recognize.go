@@ -1,11 +1,9 @@
 package recognize
 
 import (
-	"bufio"
 	"fmt"
 	"image"
 	"math"
-	"os"
 
 	"github.com/multippt/gopaddleocr/pkg/ocr/onnx"
 	"github.com/multippt/gopaddleocr/pkg/ocr/utils"
@@ -13,22 +11,14 @@ import (
 )
 
 type ModelConfig struct {
+	ModelPath string
+	DictPath  string
+
 	Height int
 	Mean   [3]float64
 	Std    [3]float64
 
 	OnnxConfig onnx.Config
-}
-
-var DefaultConfig = &ModelConfig{
-	Height: 48,
-	Mean:   [3]float64{0.5, 0.5, 0.5},
-	Std:    [3]float64{0.5, 0.5, 0.5},
-
-	OnnxConfig: onnx.Config{
-		InputName:  "x",
-		OutputName: "fetch_name_0",
-	},
 }
 
 // ---------------------------------------------------------------------------
@@ -37,27 +27,23 @@ var DefaultConfig = &ModelConfig{
 
 type Model struct {
 	session  *ort.DynamicAdvancedSession
-	charDict []string
+	charDict *CharsetDict
 	config   *ModelConfig
 }
 
-func NewModel(modelPath, dictPath string) (*Model, error) {
-	if err := EnsureCharDict(modelPath, dictPath); err != nil {
+func NewModel(cfg *ModelConfig) (*Model, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("recognize: config is required")
+	}
+	dict, err := NewCharsetDict(cfg.ModelPath, cfg.DictPath)
+	if err != nil {
 		return nil, fmt.Errorf("char dict: %w", err)
 	}
-	dict, err := loadCharDict(dictPath)
-	if err != nil {
-		return nil, fmt.Errorf("load char dict: %w", err)
-	}
-
-	m := &Model{
-		config:   DefaultConfig,
-		charDict: dict,
-	}
-	session, err := ort.NewDynamicAdvancedSession(modelPath,
-		[]string{m.config.OnnxConfig.InputName},
-		[]string{m.config.OnnxConfig.OutputName},
-		m.config.OnnxConfig.Options)
+	m := &Model{config: cfg, charDict: dict}
+	session, err := ort.NewDynamicAdvancedSession(cfg.ModelPath,
+		[]string{cfg.OnnxConfig.InputName},
+		[]string{cfg.OnnxConfig.OutputName},
+		cfg.OnnxConfig.Options)
 	if err != nil {
 		return nil, err
 	}
@@ -146,98 +132,6 @@ func (m *Model) Run(img image.Image, quad [4][2]int) (string, float64, error) {
 		return "", 0, fmt.Errorf("unexpected rec output shape: %v", outShape)
 	}
 
-	text, score := ctcDecode(logits, T, numClasses, m.charDict)
+	text, score := m.charDict.Decode(logits, T, numClasses)
 	return text, score, nil
-}
-
-// ---------------------------------------------------------------------------
-// Character dictionary
-// ---------------------------------------------------------------------------
-
-// loadCharDict reads ppocr_keys_v1.txt (one char per line).
-// Index 0 is the CTC blank token; indices 1..N map to the file lines.
-// A trailing space character (standard PaddleOCR convention) is appended.
-func loadCharDict(path string) ([]string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		_ = f.Close()
-	}()
-
-	dict := []string{""} // index 0 = blank
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		dict = append(dict, sc.Text())
-	}
-	dict = append(dict, " ") // trailing space
-	return dict, sc.Err()
-}
-
-// ---------------------------------------------------------------------------
-// CTC decoding
-// ---------------------------------------------------------------------------
-
-// ctcDecode runs argmax-CTC on logits shaped (T × numClasses) flattened.
-// Returns the decoded string and the geometric-mean confidence of emitted chars.
-func ctcDecode(logits []float32, T, numClasses int, charDict []string) (string, float64) {
-	if T == 0 || numClasses == 0 {
-		return "", 0
-	}
-	if len(logits) < T*numClasses {
-		return "", 0
-	}
-
-	type step struct {
-		class int
-		prob  float32
-	}
-	steps := make([]step, T)
-	for t := 0; t < T; t++ {
-		best := 0
-		bestP := logits[t*numClasses]
-		for c := 1; c < numClasses; c++ {
-			if logits[t*numClasses+c] > bestP {
-				bestP = logits[t*numClasses+c]
-				best = c
-			}
-		}
-		steps[t] = step{best, bestP}
-	}
-
-	var runes []rune
-	var probs []float64
-	prev := -1
-	for _, s := range steps {
-		if s.class == 0 {
-			prev = 0
-			continue
-		}
-		if s.class == prev {
-			continue
-		}
-		if s.class < len(charDict) {
-			for _, r := range charDict[s.class] {
-				runes = append(runes, r)
-			}
-			probs = append(probs, float64(s.prob))
-		}
-		prev = s.class
-	}
-
-	if len(runes) == 0 {
-		return "", 0
-	}
-
-	// Geometric mean confidence.
-	logSum := 0.0
-	for _, p := range probs {
-		if p > 0 {
-			logSum += math.Log(p)
-		}
-	}
-	score := math.Exp(logSum / float64(len(probs)))
-
-	return string(runes), score
 }

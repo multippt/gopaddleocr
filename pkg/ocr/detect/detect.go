@@ -11,6 +11,8 @@ import (
 )
 
 type ModelConfig struct {
+	ModelPath string
+
 	LimitSideLength int
 	Std             [3]float32
 	Mean            [3]float32
@@ -22,21 +24,6 @@ type ModelConfig struct {
 	OnnxConfig onnx.Config
 }
 
-var DefaultConfig = &ModelConfig{
-	LimitSideLength: 1280,
-	Mean:            [3]float32{0.485, 0.456, 0.406},
-	Std:             [3]float32{0.229, 0.224, 0.225},
-	Thresh:          0.3,
-	BoxThresh:       0.6,
-	UnclipRatio:     2.0,
-	MinArea:         16,
-
-	OnnxConfig: onnx.Config{
-		InputName:  "x",
-		OutputName: "fetch_name_0",
-	},
-}
-
 // ---------------------------------------------------------------------------
 // Model wraps the DB detection ONNX session
 // ---------------------------------------------------------------------------
@@ -46,14 +33,15 @@ type Model struct {
 	config  *ModelConfig
 }
 
-func NewModel(path string) (*Model, error) {
-	m := &Model{
-		config: DefaultConfig,
+func NewModel(cfg *ModelConfig) (*Model, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("detect: config is required")
 	}
-	session, err := ort.NewDynamicAdvancedSession(path,
-		[]string{m.config.OnnxConfig.InputName},
-		[]string{m.config.OnnxConfig.OutputName},
-		m.config.OnnxConfig.Options)
+	m := &Model{config: cfg}
+	session, err := ort.NewDynamicAdvancedSession(cfg.ModelPath,
+		[]string{cfg.OnnxConfig.InputName},
+		[]string{cfg.OnnxConfig.OutputName},
+		cfg.OnnxConfig.Options)
 	if err != nil {
 		return nil, err
 	}

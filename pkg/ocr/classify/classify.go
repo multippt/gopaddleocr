@@ -11,6 +11,8 @@ import (
 )
 
 type ModelConfig struct {
+	ModelPath string
+
 	Height    int
 	Width     int
 	Threshold float32
@@ -18,18 +20,6 @@ type ModelConfig struct {
 	Std       [3]float64
 
 	OnnxConfig onnx.Config
-}
-
-var DefaultConfig = &ModelConfig{
-	Height:    48,
-	Width:     192,
-	Threshold: 0.9,
-	Mean:      [3]float64{0.5, 0.5, 0.5},
-	Std:       [3]float64{0.5, 0.5, 0.5},
-	OnnxConfig: onnx.Config{
-		InputName:  "x",
-		OutputName: "save_infer_model/scale_0.tmp_1",
-	},
 }
 
 // ---------------------------------------------------------------------------
@@ -41,14 +31,15 @@ type Model struct {
 	config  *ModelConfig
 }
 
-func NewModel(path string) (*Model, error) {
-	m := &Model{
-		config: DefaultConfig,
+func NewModel(cfg *ModelConfig) (*Model, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("classify: config is required")
 	}
-	session, err := ort.NewDynamicAdvancedSession(path,
-		[]string{m.config.OnnxConfig.InputName},
-		[]string{m.config.OnnxConfig.OutputName},
-		m.config.OnnxConfig.Options)
+	m := &Model{config: cfg}
+	session, err := ort.NewDynamicAdvancedSession(cfg.ModelPath,
+		[]string{cfg.OnnxConfig.InputName},
+		[]string{cfg.OnnxConfig.OutputName},
+		cfg.OnnxConfig.Options)
 	if err != nil {
 		return nil, err
 	}

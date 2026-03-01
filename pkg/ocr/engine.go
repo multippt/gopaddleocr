@@ -8,6 +8,7 @@ import (
 
 	"github.com/multippt/gopaddleocr/pkg/ocr/classify"
 	"github.com/multippt/gopaddleocr/pkg/ocr/detect"
+	"github.com/multippt/gopaddleocr/pkg/ocr/onnx"
 	"github.com/multippt/gopaddleocr/pkg/ocr/recognize"
 )
 
@@ -19,17 +20,127 @@ type Result struct {
 }
 
 type Config struct {
-	DetectModelPath    string
-	ClassifyModelPath  string
-	RecognizeModelPath string
-	RecognizeDictPath  string
+	DetectModelConfig   *detect.ModelConfig
+	ClassifyModelConfig *classify.ModelConfig
+	RecognizeModelConfig *recognize.ModelConfig
 }
 
 var DefaultConfig = &Config{
-	DetectModelPath:    filepath.Join("./models", "ch_PP-OCRv5_server_det.onnx"),
-	ClassifyModelPath:  filepath.Join("./models", "ch_ppocr_mobile_v2.0_cls_infer.onnx"),
-	RecognizeModelPath: filepath.Join("./models", "ch_PP-OCRv5_rec_server_infer.onnx"),
-	RecognizeDictPath:  filepath.Join("./models", "ppocr_keys_v5.txt"),
+	DetectModelConfig: &detect.ModelConfig{
+		ModelPath:       filepath.Join("./models", "ch_PP-OCRv5_server_det.onnx"),
+		LimitSideLength: 1280,
+		Mean:            [3]float32{0.485, 0.456, 0.406},
+		Std:             [3]float32{0.229, 0.224, 0.225},
+		Thresh:          0.3,
+		BoxThresh:       0.6,
+		UnclipRatio:     2.0,
+		MinArea:         16,
+		OnnxConfig: onnx.Config{
+			InputName:  "x",
+			OutputName: "fetch_name_0",
+		},
+	},
+	ClassifyModelConfig: &classify.ModelConfig{
+		ModelPath:  filepath.Join("./models", "ch_ppocr_mobile_v2.0_cls_infer.onnx"),
+		Height:     48,
+		Width:      192,
+		Threshold:  0.9,
+		Mean:       [3]float64{0.5, 0.5, 0.5},
+		Std:        [3]float64{0.5, 0.5, 0.5},
+		OnnxConfig: onnx.Config{
+			InputName:  "x",
+			OutputName: "save_infer_model/scale_0.tmp_1",
+		},
+	},
+	RecognizeModelConfig: &recognize.ModelConfig{
+		ModelPath: filepath.Join("./models", "ch_PP-OCRv5_rec_server_infer.onnx"),
+		DictPath:  filepath.Join("./models", "ppocr_keys_v5.txt"),
+		Height:    48,
+		Mean:      [3]float64{0.5, 0.5, 0.5},
+		Std:       [3]float64{0.5, 0.5, 0.5},
+		OnnxConfig: onnx.Config{
+			InputName:  "x",
+			OutputName: "fetch_name_0",
+		},
+	},
+}
+
+// Option mutates the engine Config (used by NewPaddleOCREngine).
+type Option func(*Config)
+
+// WithConfig sets the entire config. Use for full custom config or tests.
+func WithConfig(cfg *Config) Option {
+	return func(c *Config) {
+		if cfg != nil {
+			*c = *cfg
+			if cfg.DetectModelConfig != nil {
+				detCfg := *cfg.DetectModelConfig
+				c.DetectModelConfig = &detCfg
+			}
+			if cfg.ClassifyModelConfig != nil {
+				clsCfg := *cfg.ClassifyModelConfig
+				c.ClassifyModelConfig = &clsCfg
+			}
+			if cfg.RecognizeModelConfig != nil {
+				recCfg := *cfg.RecognizeModelConfig
+				c.RecognizeModelConfig = &recCfg
+			}
+		}
+	}
+}
+
+// WithDetectModelPath sets the detection model path.
+func WithDetectModelPath(path string) Option {
+	return func(c *Config) {
+		if c.DetectModelConfig != nil {
+			c.DetectModelConfig.ModelPath = path
+		}
+	}
+}
+
+// WithClassifyModelPath sets the classification model path.
+func WithClassifyModelPath(path string) Option {
+	return func(c *Config) {
+		if c.ClassifyModelConfig != nil {
+			c.ClassifyModelConfig.ModelPath = path
+		}
+	}
+}
+
+// WithRecognizeModelPath sets the recognition model path.
+func WithRecognizeModelPath(path string) Option {
+	return func(c *Config) {
+		if c.RecognizeModelConfig != nil {
+			c.RecognizeModelConfig.ModelPath = path
+		}
+	}
+}
+
+// WithRecognizeDictPath sets the recognition dictionary path.
+func WithRecognizeDictPath(path string) Option {
+	return func(c *Config) {
+		if c.RecognizeModelConfig != nil {
+			c.RecognizeModelConfig.DictPath = path
+		}
+	}
+}
+
+// defaultConfigCopy returns a deep copy of DefaultConfig so callers can mutate it via options.
+func defaultConfigCopy() *Config {
+	cfg := &Config{}
+	if DefaultConfig.DetectModelConfig != nil {
+		det := *DefaultConfig.DetectModelConfig
+		cfg.DetectModelConfig = &det
+	}
+	if DefaultConfig.ClassifyModelConfig != nil {
+		cls := *DefaultConfig.ClassifyModelConfig
+		cfg.ClassifyModelConfig = &cls
+	}
+	if DefaultConfig.RecognizeModelConfig != nil {
+		rec := *DefaultConfig.RecognizeModelConfig
+		cfg.RecognizeModelConfig = &rec
+	}
+	return cfg
 }
 
 // PaddleOCREngine coordinates the detect → classify → recognize pipeline.
@@ -44,9 +155,13 @@ type PaddleOCREngine struct {
 	config *Config
 }
 
-func NewPaddleOCREngine() *PaddleOCREngine {
+func NewPaddleOCREngine(opts ...Option) *PaddleOCREngine {
+	cfg := defaultConfigCopy()
+	for _, opt := range opts {
+		opt(cfg)
+	}
 	return &PaddleOCREngine{
-		config: DefaultConfig,
+		config: cfg,
 	}
 }
 
@@ -60,19 +175,28 @@ func (e *PaddleOCREngine) Load() error {
 }
 
 func (e *PaddleOCREngine) doLoad() error {
-	var err error
+	if e.config.DetectModelConfig == nil {
+		return fmt.Errorf("load det model: DetectModelConfig is nil")
+	}
+	if e.config.ClassifyModelConfig == nil {
+		return fmt.Errorf("load cls model: ClassifyModelConfig is nil")
+	}
+	if e.config.RecognizeModelConfig == nil {
+		return fmt.Errorf("load rec model: RecognizeModelConfig is nil")
+	}
 
-	e.det, err = detect.NewModel(e.config.DetectModelPath)
+	var err error
+	e.det, err = detect.NewModel(e.config.DetectModelConfig)
 	if err != nil {
 		return fmt.Errorf("load det model: %w", err)
 	}
 
-	e.cls, err = classify.NewModel(e.config.ClassifyModelPath)
+	e.cls, err = classify.NewModel(e.config.ClassifyModelConfig)
 	if err != nil {
 		return fmt.Errorf("load cls model: %w", err)
 	}
 
-	e.rec, err = recognize.NewModel(e.config.RecognizeModelPath, e.config.DetectModelPath)
+	e.rec, err = recognize.NewModel(e.config.RecognizeModelConfig)
 	if err != nil {
 		return fmt.Errorf("load rec model: %w", err)
 	}

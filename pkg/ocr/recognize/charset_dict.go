@@ -6,18 +6,39 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"strings"
 )
 
 // ---------------------------------------------------------------------------
-// Public entry point
+// CharsetDict
 // ---------------------------------------------------------------------------
 
-// EnsureCharDict checks whether dictPath exists; if it does not, it extracts
-// the embedded 'character' metadata from the ONNX model at modelPath and
-// writes the result to dictPath so subsequent runs can reuse it.
-func EnsureCharDict(modelPath, dictPath string) error {
+// CharsetDict holds the character list for CTC decoding (index 0 = blank, then
+// file lines, then trailing space per PaddleOCR convention).
+type CharsetDict struct {
+	entries []string
+}
+
+// NewCharsetDict ensures the dict file exists at dictPath (extracting from the
+// ONNX model at modelPath if needed), then loads it. Single entry point for
+// "use this model and dict path."
+func NewCharsetDict(modelPath, dictPath string) (*CharsetDict, error) {
+	d := &CharsetDict{}
+	if err := d.Ensure(modelPath, dictPath); err != nil {
+		return nil, err
+	}
+	if err := d.Load(dictPath); err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
+// Ensure ensures the dict file exists at dictPath; if not, extracts the
+// embedded 'character' metadata from the ONNX model at modelPath and writes
+// it to dictPath. Idempotent.
+func (d *CharsetDict) Ensure(modelPath, dictPath string) error {
 	if _, err := os.Stat(dictPath); err == nil {
 		return nil // already cached
 	}
@@ -48,6 +69,95 @@ func EnsureCharDict(modelPath, dictPath string) error {
 	n := strings.Count(raw, "\n")
 	log.Printf("char dict: wrote %d entries to %q", n, dictPath)
 	return nil
+}
+
+// Load reads the dict file at path (one char per line). Index 0 is the CTC
+// blank token; indices 1..N map to the file lines. A trailing space is appended.
+func (d *CharsetDict) Load(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = f.Close()
+	}()
+
+	d.entries = []string{""} // index 0 = blank
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		d.entries = append(d.entries, sc.Text())
+	}
+	d.entries = append(d.entries, " ") // trailing space
+	return sc.Err()
+}
+
+// Entries returns the character list (for tests or other callers).
+func (d *CharsetDict) Entries() []string {
+	return d.entries
+}
+
+// Decode runs argmax-CTC on logits shaped (T × numClasses) flattened using
+// this dict. Returns the decoded string and the geometric-mean confidence.
+func (d *CharsetDict) Decode(logits []float32, T, numClasses int) (string, float64) {
+	charDict := d.entries
+	if T == 0 || numClasses == 0 {
+		return "", 0
+	}
+	if len(logits) < T*numClasses {
+		return "", 0
+	}
+
+	type step struct {
+		class int
+		prob  float32
+	}
+	steps := make([]step, T)
+	for t := 0; t < T; t++ {
+		best := 0
+		bestP := logits[t*numClasses]
+		for c := 1; c < numClasses; c++ {
+			if logits[t*numClasses+c] > bestP {
+				bestP = logits[t*numClasses+c]
+				best = c
+			}
+		}
+		steps[t] = step{best, bestP}
+	}
+
+	var runes []rune
+	var probs []float64
+	prev := -1
+	for _, s := range steps {
+		if s.class == 0 {
+			prev = 0
+			continue
+		}
+		if s.class == prev {
+			continue
+		}
+		if s.class < len(charDict) {
+			for _, r := range charDict[s.class] {
+				runes = append(runes, r)
+			}
+			probs = append(probs, float64(s.prob))
+		}
+		prev = s.class
+	}
+
+	if len(runes) == 0 {
+		return "", 0
+	}
+
+	// Geometric mean confidence.
+	logSum := 0.0
+	for _, p := range probs {
+		if p > 0 {
+			logSum += math.Log(p)
+		}
+	}
+	score := math.Exp(logSum / float64(len(probs)))
+
+	return string(runes), score
 }
 
 // ---------------------------------------------------------------------------

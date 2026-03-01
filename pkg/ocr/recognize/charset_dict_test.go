@@ -32,23 +32,25 @@ func TestEnsureCharDictCreatesFile(t *testing.T) {
 
 	tmp := t.TempDir() + "/test_keys.txt"
 
-	if err := EnsureCharDict(model, tmp); err != nil {
-		t.Fatalf("EnsureCharDict: %v", err)
-	}
-
-	dict, err := loadCharDict(tmp)
+	d, err := NewCharsetDict(model, tmp)
 	if err != nil {
-		t.Fatalf("loadCharDict: %v", err)
+		t.Fatalf("NewCharsetDict: %v", err)
 	}
-	t.Logf("loaded %d entries (incl. blank at 0)", len(dict))
 
-	if len(dict) < 6000 {
-		t.Errorf("expected at least 6000 dict entries, got %d", len(dict))
+	entries := d.Entries()
+	t.Logf("loaded %d entries (incl. blank at 0)", len(entries))
+
+	if len(entries) < 6000 {
+		t.Errorf("expected at least 6000 dict entries, got %d", len(entries))
 	}
 
 	// Calling again should be a no-op (file already exists).
-	if err := EnsureCharDict(model, tmp); err != nil {
-		t.Fatalf("second EnsureCharDict: %v", err)
+	d2, err := NewCharsetDict(model, tmp)
+	if err != nil {
+		t.Fatalf("second NewCharsetDict: %v", err)
+	}
+	if len(d2.Entries()) != len(entries) {
+		t.Errorf("second load: got %d entries, want %d", len(d2.Entries()), len(entries))
 	}
 }
 

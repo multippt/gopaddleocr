@@ -3,7 +3,25 @@ package detect
 import (
 	"math"
 	"testing"
+
+	"github.com/multippt/gopaddleocr/pkg/ocr/onnx"
 )
+
+// testDetConfig is used by tests that need a ModelConfig without importing ocr (avoids cycle).
+// Values match the defaults previously in DefaultConfig.
+var testDetConfig = &ModelConfig{
+	LimitSideLength: 1280,
+	Mean:            [3]float32{0.485, 0.456, 0.406},
+	Std:             [3]float32{0.229, 0.224, 0.225},
+	Thresh:          0.3,
+	BoxThresh:       0.6,
+	UnclipRatio:     2.0,
+	MinArea:         16,
+	OnnxConfig: onnx.Config{
+		InputName:  "x",
+		OutputName: "fetch_name_0",
+	},
+}
 
 // ---------------------------------------------------------------------------
 // unclipPoly tests
@@ -67,7 +85,7 @@ func TestUnclipPolyTextRegion(t *testing.T) {
 		{276, 15},
 		{0, 15},
 	}
-	got := unclipPoly(poly, DefaultConfig.UnclipRatio)
+	got := unclipPoly(poly, testDetConfig.UnclipRatio)
 
 	minY, maxY := got[0][1], got[0][1]
 	for _, p := range got[1:] {
@@ -164,7 +182,7 @@ func TestDetPostprocess_SimpleRect(t *testing.T) {
 		}
 	}
 
-	m := &Model{config: DefaultConfig}
+	m := &Model{config: testDetConfig}
 	quads := m.postprocess(prob, padH, padW, resH, resW, origH, origW)
 	if len(quads) == 0 {
 		t.Fatal("expected at least one quad, got none")
