@@ -312,3 +312,25 @@ func PointDistance(a, b [2]float64) float64 {
 	dx, dy := a[0]-b[0], a[1]-b[1]
 	return math.Sqrt(dx*dx + dy*dy)
 }
+
+// PointInPolyF uses ray-casting to test whether (px,py) is inside polygon.
+func PointInPolyF(px, py float64, poly [][2]float64) bool {
+	n := len(poly)
+	inside := false
+	j := n - 1
+	for i := 0; i < n; i++ {
+		xi, yi := poly[i][0], poly[i][1]
+		xj, yj := poly[j][0], poly[j][1]
+		if ((yi > py) != (yj > py)) && (px < (xj-xi)*(py-yi)/(yj-yi)+xi) {
+			inside = !inside
+		}
+		j = i
+	}
+	return inside
+}
+
+// PointInQuad4 wraps PointInPolyF for the fixed 4-point quad used in handlers.
+func PointInQuad4(px, py float64, q [4][2]float64) bool {
+	poly := [][2]float64{q[0], q[1], q[2], q[3]}
+	return PointInPolyF(px, py, poly)
+}

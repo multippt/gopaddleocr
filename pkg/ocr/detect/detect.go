@@ -549,7 +549,7 @@ func boxScore(probMap []float32, W int, poly [][2]float64) float64 {
 	var cnt int
 	for y := y0; y <= y1; y++ {
 		for x := x0; x <= x1; x++ {
-			if pointInPolyF(float64(x), float64(y), poly) {
+			if utils.PointInPolyF(float64(x), float64(y), poly) {
 				sum += float64(probMap[y*W+x])
 				cnt++
 			}
@@ -559,26 +559,4 @@ func boxScore(probMap []float32, W int, poly [][2]float64) float64 {
 		return 0
 	}
 	return sum / float64(cnt)
-}
-
-// pointInPolyF uses ray-casting to test whether (px,py) is inside polygon.
-func pointInPolyF(px, py float64, poly [][2]float64) bool {
-	n := len(poly)
-	inside := false
-	j := n - 1
-	for i := 0; i < n; i++ {
-		xi, yi := poly[i][0], poly[i][1]
-		xj, yj := poly[j][0], poly[j][1]
-		if ((yi > py) != (yj > py)) && (px < (xj-xi)*(py-yi)/(yj-yi)+xi) {
-			inside = !inside
-		}
-		j = i
-	}
-	return inside
-}
-
-// pointInQuad4 wraps pointInPolyF for the fixed 4-point quad used in handlers.
-func pointInQuad4(px, py float64, q [4][2]float64) bool {
-	poly := [][2]float64{q[0], q[1], q[2], q[3]}
-	return pointInPolyF(px, py, poly)
 }

@@ -20,50 +20,54 @@ type Result struct {
 }
 
 type Config struct {
-	DetectModelConfig   *detect.ModelConfig
-	ClassifyModelConfig *classify.ModelConfig
+	DetectModelConfig    *detect.ModelConfig
+	ClassifyModelConfig  *classify.ModelConfig
 	RecognizeModelConfig *recognize.ModelConfig
 }
 
-var DefaultConfig = &Config{
-	DetectModelConfig: &detect.ModelConfig{
-		ModelPath:       filepath.Join("./models", "ch_PP-OCRv5_server_det.onnx"),
-		LimitSideLength: 1280,
-		Mean:            [3]float32{0.485, 0.456, 0.406},
-		Std:             [3]float32{0.229, 0.224, 0.225},
-		Thresh:          0.3,
-		BoxThresh:       0.6,
-		UnclipRatio:     2.0,
-		MinArea:         16,
-		OnnxConfig: onnx.Config{
-			InputName:  "x",
-			OutputName: "fetch_name_0",
+func NewDefaultConfig() *Config {
+	return &Config{
+		DetectModelConfig: &detect.ModelConfig{
+			ModelPath:       filepath.Join("./models", "ch_PP-OCRv5_server_det.onnx"),
+			LimitSideLength: 1280,
+			Mean:            [3]float32{0.485, 0.456, 0.406},
+			Std:             [3]float32{0.229, 0.224, 0.225},
+			Thresh:          0.3,
+			BoxThresh:       0.6,
+			UnclipRatio:     2.0,
+			MinArea:         16,
+			OnnxConfig: onnx.Config{
+				InputName:  "x",
+				OutputName: "fetch_name_0",
+			},
 		},
-	},
-	ClassifyModelConfig: &classify.ModelConfig{
-		ModelPath:  filepath.Join("./models", "ch_ppocr_mobile_v2.0_cls_infer.onnx"),
-		Height:     48,
-		Width:      192,
-		Threshold:  0.9,
-		Mean:       [3]float64{0.5, 0.5, 0.5},
-		Std:        [3]float64{0.5, 0.5, 0.5},
-		OnnxConfig: onnx.Config{
-			InputName:  "x",
-			OutputName: "save_infer_model/scale_0.tmp_1",
+		ClassifyModelConfig: &classify.ModelConfig{
+			ModelPath: filepath.Join("./models", "ch_ppocr_mobile_v2.0_cls_infer.onnx"),
+			Height:    48,
+			Width:     192,
+			Threshold: 0.9,
+			Mean:      [3]float64{0.5, 0.5, 0.5},
+			Std:       [3]float64{0.5, 0.5, 0.5},
+			OnnxConfig: onnx.Config{
+				InputName:  "x",
+				OutputName: "save_infer_model/scale_0.tmp_1",
+			},
 		},
-	},
-	RecognizeModelConfig: &recognize.ModelConfig{
-		ModelPath: filepath.Join("./models", "ch_PP-OCRv5_rec_server_infer.onnx"),
-		DictPath:  filepath.Join("./models", "ppocr_keys_v5.txt"),
-		Height:    48,
-		Mean:      [3]float64{0.5, 0.5, 0.5},
-		Std:       [3]float64{0.5, 0.5, 0.5},
-		OnnxConfig: onnx.Config{
-			InputName:  "x",
-			OutputName: "fetch_name_0",
+		RecognizeModelConfig: &recognize.ModelConfig{
+			ModelPath: filepath.Join("./models", "ch_PP-OCRv5_rec_server_infer.onnx"),
+			DictPath:  filepath.Join("./models", "ppocr_keys_v5.txt"),
+			Height:    48,
+			Mean:      [3]float64{0.5, 0.5, 0.5},
+			Std:       [3]float64{0.5, 0.5, 0.5},
+			OnnxConfig: onnx.Config{
+				InputName:  "x",
+				OutputName: "fetch_name_0",
+			},
 		},
-	},
+	}
 }
+
+var DefaultConfig = NewDefaultConfig()
 
 // Option mutates the engine Config (used by NewPaddleOCREngine).
 type Option func(*Config)
