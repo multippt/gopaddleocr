@@ -2,6 +2,7 @@ package server
 
 import (
 	"image"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -20,11 +21,13 @@ func (s *Server) handleHealth(c *gin.Context) {
 func (s *Server) handleOCR(c *gin.Context) {
 	data, err := parseImageBytes(c)
 	if err != nil || data == nil {
+		log.Printf("Error parsing image bytes: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "invalid or missing image"})
 		return
 	}
 	img, err := decodeImage(data)
 	if err != nil {
+		log.Printf("Error decoding image: %v %v", len(data), err)
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "cannot decode image: " + err.Error()})
 		return
 	}

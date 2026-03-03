@@ -5,11 +5,15 @@ import (
 	"encoding/base64"
 	"image"
 	"image/draw"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	_ "golang.org/x/image/webp"
 )
 
 // ---------------------------------------------------------------------------
