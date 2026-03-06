@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/multippt/gopaddleocr/pkg/ocr/classify"
@@ -16,10 +17,12 @@ import (
 )
 
 // Result is a single detected text region.
+// When Children is non-empty, this is a merged parent region containing child text lines.
 type Result struct {
-	Box   [][2]int `json:"box"` // [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
-	Text  string   `json:"text"`
-	Score float64  `json:"score"`
+	Box      [][2]int `json:"box"` // [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
+	Text     string   `json:"text"`
+	Score    float64  `json:"score"`
+	Children []Result `json:"children,omitempty"`
 }
 
 type Config struct {
@@ -31,6 +34,12 @@ type Config struct {
 	Detector   detect.Detector
 	Classifier classify.Classifier
 	Recognizer recognize.Recognizer
+
+	// RecognizeParent controls behavior when detection returns hierarchical boxes.
+	// When false (default, PaddleOCR workflow): cls+rec operate on child boxes,
+	// text is aggregated per parent.
+	// When true (GLM-OCR workflow): rec operates on parent boxes only, children ignored.
+	RecognizeParent bool
 }
 
 func NewDefaultConfig() *Config {
@@ -155,6 +164,14 @@ func WithClassifier(cls classify.Classifier) Option {
 func WithRecognizer(r recognize.Recognizer) Option {
 	return func(c *Config) {
 		c.Recognizer = r
+	}
+}
+
+// WithRecognizeParent sets whether recognition operates on parent boxes (true)
+// or child boxes (false). Use true for GLM-OCR workflows, false for PaddleOCR.
+func WithRecognizeParent(v bool) Option {
+	return func(c *Config) {
+		c.RecognizeParent = v
 	}
 }
 
@@ -289,31 +306,83 @@ func (e *PaddleOCREngine) RunOCR(img image.Image) ([]Result, error) {
 
 	var results []Result
 	for _, box := range boxes {
-		quad := box.Quad
-
-		// Classification: determine if crop needs 180° flip.
-		flip, err := e.cls.Classify(img, quad)
-		if err != nil {
-			flip = false // non-fatal
+		if len(box.Children) > 0 {
+			r := e.recognizeHierarchical(img, box)
+			if r != nil {
+				results = append(results, *r)
+			}
+		} else {
+			r := e.recognizeFlat(img, box)
+			if r != nil {
+				results = append(results, *r)
+			}
 		}
-		if flip {
-			// Reverse point order → 180° rotation in perspective warp.
-			quad = [4][2]int{quad[2], quad[3], quad[0], quad[1]}
-		}
-
-		res, err := e.rec.Recognize(img, quad)
-		if err != nil {
-			continue // skip unreadable region
-		}
-		if res.Text == "" {
-			continue
-		}
-
-		outBox := [][2]int{quad[0], quad[1], quad[2], quad[3]}
-		results = append(results, Result{Box: outBox, Text: res.Text, Score: res.Score})
 	}
 
 	return results, nil
+}
+
+// recognizeFlat runs cls+rec on a single box (no children).
+func (e *PaddleOCREngine) recognizeFlat(img image.Image, box detect.Box) *Result {
+	quad := box.Quad
+
+	flip, err := e.cls.Classify(img, quad)
+	if err != nil {
+		flip = false
+	}
+	if flip {
+		quad = [4][2]int{quad[2], quad[3], quad[0], quad[1]}
+	}
+
+	res, err := e.rec.Recognize(img, quad)
+	if err != nil || res.Text == "" {
+		return nil
+	}
+
+	outBox := [][2]int{quad[0], quad[1], quad[2], quad[3]}
+	return &Result{Box: outBox, Text: res.Text, Score: res.Score}
+}
+
+// recognizeHierarchical handles a parent box with children.
+// RecognizeParent=false (PaddleOCR): cls+rec on children, aggregate per parent.
+// RecognizeParent=true (GLM-OCR): rec on parent box only.
+func (e *PaddleOCREngine) recognizeHierarchical(img image.Image, parent detect.Box) *Result {
+	parentQuad := parent.Quad
+	outBox := [][2]int{parentQuad[0], parentQuad[1], parentQuad[2], parentQuad[3]}
+
+	if e.config.RecognizeParent {
+		// GLM-OCR: recognize parent box directly, ignore children.
+		res, err := e.rec.Recognize(img, parentQuad)
+		if err != nil || res.Text == "" {
+			return nil
+		}
+		return &Result{Box: outBox, Text: res.Text, Score: res.Score}
+	}
+
+	// PaddleOCR: classify+recognize each child, aggregate text.
+	var childResults []Result
+	var texts []string
+	var scoreSum float64
+	for _, child := range parent.Children {
+		r := e.recognizeFlat(img, child)
+		if r != nil {
+			childResults = append(childResults, *r)
+			texts = append(texts, r.Text)
+			scoreSum += r.Score
+		}
+	}
+	if len(childResults) == 0 {
+		return nil
+	}
+
+	avgScore := scoreSum / float64(len(childResults))
+	joined := strings.Join(texts, " ")
+	return &Result{
+		Box:      outBox,
+		Text:     joined,
+		Score:    avgScore,
+		Children: childResults,
+	}
 }
 
 // DetectOnly runs only the detection model and returns boxes.
