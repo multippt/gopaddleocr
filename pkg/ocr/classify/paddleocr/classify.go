@@ -1,9 +1,8 @@
-package classify
+package paddleocr
 
 import (
 	"fmt"
 	"image"
-	"image/color"
 
 	"github.com/multippt/gopaddleocr/pkg/ocr/onnx"
 	"github.com/multippt/gopaddleocr/pkg/ocr/utils"
@@ -47,8 +46,15 @@ func NewModel(cfg *ModelConfig) (*Model, error) {
 	return m, nil
 }
 
-// Run returns true if the crop needs 180° rotation.
-func (m *Model) Run(img image.Image, quad [4][2]int) (bool, error) {
+func (m *Model) Close() error {
+	if m.session != nil {
+		return m.session.Destroy()
+	}
+	return nil
+}
+
+// Classify returns true if the crop needs 180° rotation.
+func (m *Model) Classify(img image.Image, quad [4][2]int) (bool, error) {
 	crop := utils.PerspectiveWarp(img, utils.FloatQuad(quad), m.config.Width, m.config.Height)
 	if crop == nil {
 		return false, nil
@@ -85,6 +91,3 @@ func (m *Model) Run(img image.Image, quad [4][2]int) (bool, error) {
 	}
 	return logits[1] > logits[0] && logits[1] > m.config.Threshold, nil
 }
-
-// Ensure color import used.
-var _ = color.RGBA{}

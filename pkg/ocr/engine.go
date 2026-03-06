@@ -7,9 +7,12 @@ import (
 	"sync"
 
 	"github.com/multippt/gopaddleocr/pkg/ocr/classify"
+	classifypaddleocr "github.com/multippt/gopaddleocr/pkg/ocr/classify/paddleocr"
 	"github.com/multippt/gopaddleocr/pkg/ocr/detect"
+	detectpaddleocr "github.com/multippt/gopaddleocr/pkg/ocr/detect/paddleocr"
 	"github.com/multippt/gopaddleocr/pkg/ocr/onnx"
 	"github.com/multippt/gopaddleocr/pkg/ocr/recognize"
+	recognizepaddleocr "github.com/multippt/gopaddleocr/pkg/ocr/recognize/paddleocr"
 )
 
 // Result is a single detected text region.
@@ -20,14 +23,19 @@ type Result struct {
 }
 
 type Config struct {
-	DetectModelConfig    *detect.ModelConfig
-	ClassifyModelConfig  *classify.ModelConfig
-	RecognizeModelConfig *recognize.ModelConfig
+	DetectModelConfig    *detectpaddleocr.ModelConfig
+	ClassifyModelConfig  *classifypaddleocr.ModelConfig
+	RecognizeModelConfig *recognizepaddleocr.ModelConfig
+
+	// Optional overrides — if set, bypass model-path construction.
+	Detector   detect.Detector
+	Classifier classify.Classifier
+	Recognizer recognize.Recognizer
 }
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		DetectModelConfig: &detect.ModelConfig{
+		DetectModelConfig: &detectpaddleocr.ModelConfig{
 			ModelPath:       filepath.Join("./models", "ch_PP-OCRv5_server_det.onnx"),
 			LimitSideLength: 1280,
 			Mean:            [3]float32{0.485, 0.456, 0.406},
@@ -41,7 +49,7 @@ func NewDefaultConfig() *Config {
 				OutputName: "fetch_name_0",
 			},
 		},
-		ClassifyModelConfig: &classify.ModelConfig{
+		ClassifyModelConfig: &classifypaddleocr.ModelConfig{
 			ModelPath: filepath.Join("./models", "ch_ppocr_mobile_v2.0_cls_infer.onnx"),
 			Height:    48,
 			Width:     192,
@@ -53,7 +61,7 @@ func NewDefaultConfig() *Config {
 				OutputName: "save_infer_model/scale_0.tmp_1",
 			},
 		},
-		RecognizeModelConfig: &recognize.ModelConfig{
+		RecognizeModelConfig: &recognizepaddleocr.ModelConfig{
 			ModelPath: filepath.Join("./models", "ch_PP-OCRv5_rec_server_infer.onnx"),
 			DictPath:  filepath.Join("./models", "ppocr_keys_v5.txt"),
 			Height:    48,
@@ -129,6 +137,27 @@ func WithRecognizeDictPath(path string) Option {
 	}
 }
 
+// WithDetector overrides the detector; bypasses DetectModelConfig construction.
+func WithDetector(d detect.Detector) Option {
+	return func(c *Config) {
+		c.Detector = d
+	}
+}
+
+// WithClassifier overrides the classifier; bypasses ClassifyModelConfig construction.
+func WithClassifier(cls classify.Classifier) Option {
+	return func(c *Config) {
+		c.Classifier = cls
+	}
+}
+
+// WithRecognizer overrides the recognizer; bypasses RecognizeModelConfig construction.
+func WithRecognizer(r recognize.Recognizer) Option {
+	return func(c *Config) {
+		c.Recognizer = r
+	}
+}
+
 // defaultConfigCopy returns a deep copy of DefaultConfig so callers can mutate it via options.
 func defaultConfigCopy() *Config {
 	cfg := &Config{}
@@ -152,9 +181,9 @@ type PaddleOCREngine struct {
 	once    sync.Once
 	loadErr error
 
-	det *detect.Model
-	cls *classify.Model
-	rec *recognize.Model
+	det detect.Detector
+	cls classify.Classifier
+	rec recognize.Recognizer
 
 	config *Config
 }
@@ -179,32 +208,68 @@ func (e *PaddleOCREngine) Load() error {
 }
 
 func (e *PaddleOCREngine) doLoad() error {
-	if e.config.DetectModelConfig == nil {
-		return fmt.Errorf("load det model: DetectModelConfig is nil")
-	}
-	if e.config.ClassifyModelConfig == nil {
-		return fmt.Errorf("load cls model: ClassifyModelConfig is nil")
-	}
-	if e.config.RecognizeModelConfig == nil {
-		return fmt.Errorf("load rec model: RecognizeModelConfig is nil")
-	}
-
 	var err error
-	e.det, err = detect.NewModel(e.config.DetectModelConfig)
-	if err != nil {
-		return fmt.Errorf("load det model: %w", err)
+
+	if e.config.Detector != nil {
+		e.det = e.config.Detector
+	} else {
+		if e.config.DetectModelConfig == nil {
+			return fmt.Errorf("load det model: DetectModelConfig is nil")
+		}
+		e.det, err = detectpaddleocr.NewModel(e.config.DetectModelConfig)
+		if err != nil {
+			return fmt.Errorf("load det model: %w", err)
+		}
 	}
 
-	e.cls, err = classify.NewModel(e.config.ClassifyModelConfig)
-	if err != nil {
-		return fmt.Errorf("load cls model: %w", err)
+	if e.config.Classifier != nil {
+		e.cls = e.config.Classifier
+	} else {
+		if e.config.ClassifyModelConfig == nil {
+			return fmt.Errorf("load cls model: ClassifyModelConfig is nil")
+		}
+		e.cls, err = classifypaddleocr.NewModel(e.config.ClassifyModelConfig)
+		if err != nil {
+			return fmt.Errorf("load cls model: %w", err)
+		}
 	}
 
-	e.rec, err = recognize.NewModel(e.config.RecognizeModelConfig)
-	if err != nil {
-		return fmt.Errorf("load rec model: %w", err)
+	if e.config.Recognizer != nil {
+		e.rec = e.config.Recognizer
+	} else {
+		if e.config.RecognizeModelConfig == nil {
+			return fmt.Errorf("load rec model: RecognizeModelConfig is nil")
+		}
+		e.rec, err = recognizepaddleocr.NewModel(e.config.RecognizeModelConfig)
+		if err != nil {
+			return fmt.Errorf("load rec model: %w", err)
+		}
 	}
 
+	return nil
+}
+
+// Close releases all model resources.
+func (e *PaddleOCREngine) Close() error {
+	var errs []error
+	if e.det != nil {
+		if err := e.det.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if e.cls != nil {
+		if err := e.cls.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if e.rec != nil {
+		if err := e.rec.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) > 0 {
+		return errs[0]
+	}
 	return nil
 }
 
@@ -214,18 +279,20 @@ func (e *PaddleOCREngine) RunOCR(img image.Image) ([]Result, error) {
 		return nil, err
 	}
 
-	quads, err := e.det.Run(img)
+	boxes, err := e.det.Detect(img)
 	if err != nil {
 		return nil, fmt.Errorf("detection: %w", err)
 	}
-	if len(quads) == 0 {
+	if len(boxes) == 0 {
 		return nil, nil
 	}
 
 	var results []Result
-	for _, quad := range quads {
+	for _, box := range boxes {
+		quad := box.Quad
+
 		// Classification: determine if crop needs 180° flip.
-		flip, err := e.cls.Run(img, quad)
+		flip, err := e.cls.Classify(img, quad)
 		if err != nil {
 			flip = false // non-fatal
 		}
@@ -234,25 +301,25 @@ func (e *PaddleOCREngine) RunOCR(img image.Image) ([]Result, error) {
 			quad = [4][2]int{quad[2], quad[3], quad[0], quad[1]}
 		}
 
-		text, score, err := e.rec.Run(img, quad)
+		res, err := e.rec.Recognize(img, quad)
 		if err != nil {
 			continue // skip unreadable region
 		}
-		if text == "" {
+		if res.Text == "" {
 			continue
 		}
 
-		box := [][2]int{quad[0], quad[1], quad[2], quad[3]}
-		results = append(results, Result{Box: box, Text: text, Score: score})
+		outBox := [][2]int{quad[0], quad[1], quad[2], quad[3]}
+		results = append(results, Result{Box: outBox, Text: res.Text, Score: res.Score})
 	}
 
 	return results, nil
 }
 
-// DetectOnly runs only the detection model and returns quads.
-func (e *PaddleOCREngine) DetectOnly(img image.Image) ([][4][2]int, error) {
+// DetectOnly runs only the detection model and returns boxes.
+func (e *PaddleOCREngine) DetectOnly(img image.Image) ([]detect.Box, error) {
 	if err := e.Load(); err != nil {
 		return nil, err
 	}
-	return e.det.Run(img)
+	return e.det.Detect(img)
 }

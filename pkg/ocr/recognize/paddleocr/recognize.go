@@ -1,4 +1,4 @@
-package recognize
+package paddleocr
 
 import (
 	"fmt"
@@ -6,6 +6,7 @@ import (
 	"math"
 
 	"github.com/multippt/gopaddleocr/pkg/ocr/onnx"
+	"github.com/multippt/gopaddleocr/pkg/ocr/recognize"
 	"github.com/multippt/gopaddleocr/pkg/ocr/utils"
 	ort "github.com/yalue/onnxruntime_go"
 )
@@ -51,8 +52,15 @@ func NewModel(cfg *ModelConfig) (*Model, error) {
 	return m, nil
 }
 
-// Run recognizes text in the region defined by quad (already ordered tl→tr→br→bl).
-func (m *Model) Run(img image.Image, quad [4][2]int) (string, float64, error) {
+func (m *Model) Close() error {
+	if m.session != nil {
+		return m.session.Destroy()
+	}
+	return nil
+}
+
+// Recognize recognizes text in the region defined by quad (already ordered tl→tr→br→bl).
+func (m *Model) Recognize(img image.Image, quad [4][2]int) (recognize.Result, error) {
 	// Order quad points so src[0]=TL, src[1]=TR, src[2]=BR, src[3]=BL.
 	ordered := utils.OrderPoints4(utils.FloatQuad(quad))
 
@@ -78,7 +86,7 @@ func (m *Model) Run(img image.Image, quad [4][2]int) (string, float64, error) {
 		}
 		portrait := utils.PerspectiveWarp(img, ordered, m.config.Height, targetH)
 		if portrait == nil {
-			return "", 0, nil
+			return recognize.Result{}, nil
 		}
 		warpedImg = utils.Rotate90CCW(portrait)
 		targetW = targetH // after rotation, width = former portrait height
@@ -89,7 +97,7 @@ func (m *Model) Run(img image.Image, quad [4][2]int) (string, float64, error) {
 		}
 		warpedImg = utils.PerspectiveWarp(img, ordered, targetW, m.config.Height)
 		if warpedImg == nil {
-			return "", 0, nil
+			return recognize.Result{}, nil
 		}
 	}
 
@@ -99,7 +107,7 @@ func (m *Model) Run(img image.Image, quad [4][2]int) (string, float64, error) {
 	shape := ort.NewShape(1, 3, int64(m.config.Height), int64(targetW))
 	inTensor, err := ort.NewTensor(shape, data)
 	if err != nil {
-		return "", 0, fmt.Errorf("rec input tensor: %w", err)
+		return recognize.Result{}, fmt.Errorf("rec input tensor: %w", err)
 	}
 	defer func() {
 		_ = inTensor.Destroy()
@@ -107,12 +115,12 @@ func (m *Model) Run(img image.Image, quad [4][2]int) (string, float64, error) {
 
 	outputs := make([]ort.Value, 1)
 	if err := m.session.Run([]ort.Value{inTensor}, outputs); err != nil {
-		return "", 0, fmt.Errorf("rec inference: %w", err)
+		return recognize.Result{}, fmt.Errorf("rec inference: %w", err)
 	}
 	outTensor, ok := outputs[0].(*ort.Tensor[float32])
 	if !ok {
 		_ = outputs[0].Destroy()
-		return "", 0, fmt.Errorf("unexpected rec output type")
+		return recognize.Result{}, fmt.Errorf("unexpected rec output type")
 	}
 	defer func() {
 		_ = outTensor.Destroy()
@@ -129,9 +137,9 @@ func (m *Model) Run(img image.Image, quad [4][2]int) (string, float64, error) {
 		T = int(outShape[0])
 		numClasses = int(outShape[1])
 	} else {
-		return "", 0, fmt.Errorf("unexpected rec output shape: %v", outShape)
+		return recognize.Result{}, fmt.Errorf("unexpected rec output shape: %v", outShape)
 	}
 
 	text, score := m.charDict.Decode(logits, T, numClasses)
-	return text, score, nil
+	return recognize.Result{Text: text, Score: score}, nil
 }

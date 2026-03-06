@@ -1,4 +1,4 @@
-package detect
+package paddleocr
 
 import (
 	"math"
@@ -183,12 +183,12 @@ func TestDetPostprocess_SimpleRect(t *testing.T) {
 	}
 
 	m := &Model{config: testDetConfig}
-	quads := m.postprocess(prob, padH, padW, resH, resW, origH, origW)
-	if len(quads) == 0 {
-		t.Fatal("expected at least one quad, got none")
+	boxes := m.postprocess(prob, padH, padW, resH, resW, origH, origW)
+	if len(boxes) == 0 {
+		t.Fatal("expected at least one box, got none")
 	}
 
-	q := quads[0]
+	q := boxes[0].Quad
 	// Find bounding box of returned quad in original image coords.
 	minX, minY := q[0][0], q[0][1]
 	maxX, maxY := q[0][0], q[0][1]

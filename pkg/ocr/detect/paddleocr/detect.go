@@ -1,10 +1,11 @@
-package detect
+package paddleocr
 
 import (
 	"fmt"
 	"image"
 	"math"
 
+	"github.com/multippt/gopaddleocr/pkg/ocr/detect"
 	"github.com/multippt/gopaddleocr/pkg/ocr/onnx"
 	"github.com/multippt/gopaddleocr/pkg/ocr/utils"
 	ort "github.com/yalue/onnxruntime_go"
@@ -49,8 +50,15 @@ func NewModel(cfg *ModelConfig) (*Model, error) {
 	return m, nil
 }
 
-// Run performs detection and returns ordered quads in original image space.
-func (m *Model) Run(img image.Image) ([][4][2]int, error) {
+func (m *Model) Close() error {
+	if m.session != nil {
+		return m.session.Destroy()
+	}
+	return nil
+}
+
+// Detect performs detection and returns ordered boxes in original image space.
+func (m *Model) Detect(img image.Image) ([]detect.Box, error) {
 	bounds := img.Bounds()
 	origW := bounds.Max.X - bounds.Min.X
 	origH := bounds.Max.Y - bounds.Min.Y
@@ -150,15 +158,15 @@ func (m *Model) Run(img image.Image) ([][4][2]int, error) {
 	probData := outTensor.GetData() // (1,1,padH,padW) flattened
 
 	// Postprocess
-	quads := m.postprocess(probData, padH, padW, resH, resW, origH, origW)
-	return quads, nil
+	boxes := m.postprocess(probData, padH, padW, resH, resW, origH, origW)
+	return boxes, nil
 }
 
 // ---------------------------------------------------------------------------
 // Postprocessing
 // ---------------------------------------------------------------------------
 
-func (m *Model) postprocess(probData []float32, padH, padW, resH, resW, origH, origW int) [][4][2]int {
+func (m *Model) postprocess(probData []float32, padH, padW, resH, resW, origH, origW int) []detect.Box {
 	// Build binary mask.
 	mask := make([]bool, padH*padW)
 	for i, v := range probData {
@@ -175,7 +183,7 @@ func (m *Model) postprocess(probData []float32, padH, padW, resH, resW, origH, o
 	sx := float64(origW) / float64(resW)
 	sy := float64(origH) / float64(resH)
 
-	var quads [][4][2]int
+	var boxes []detect.Box
 
 	for _, comp := range components {
 		if len(comp) < m.config.MinArea {
@@ -231,10 +239,10 @@ func (m *Model) postprocess(probData []float32, padH, padW, resH, resW, origH, o
 			quad[i][0] = utils.ClampInt(int(math.Round(p[0]*sx)), 0, origW-1)
 			quad[i][1] = utils.ClampInt(int(math.Round(p[1]*sy)), 0, origH-1)
 		}
-		quads = append(quads, quad)
+		boxes = append(boxes, detect.Box{Quad: quad, Score: boxScore(probData, padW, rectPoly), ClassID: -1, Order: -1})
 	}
 
-	return quads
+	return boxes
 }
 
 // ---------------------------------------------------------------------------

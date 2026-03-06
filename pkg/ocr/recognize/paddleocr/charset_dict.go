@@ -1,4 +1,4 @@
-package recognize
+package paddleocr
 
 import (
 	"bufio"

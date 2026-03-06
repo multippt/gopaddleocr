@@ -1,0 +1,191 @@
+package ppdoclayoutv3
+
+import (
+	"fmt"
+	"image"
+	"sort"
+
+	"github.com/multippt/gopaddleocr/pkg/ocr/detect"
+	"github.com/multippt/gopaddleocr/pkg/ocr/onnx"
+	"github.com/multippt/gopaddleocr/pkg/ocr/utils"
+	ort "github.com/yalue/onnxruntime_go"
+)
+
+type ModelConfig struct {
+	ModelPath      string
+	InputSize      int     // default 800
+	ScoreThreshold float32 // default 0.3
+	OnnxConfig     onnx.Config
+}
+
+// ---------------------------------------------------------------------------
+// Model wraps the PP-DocLayoutV3 ONNX session
+// ---------------------------------------------------------------------------
+
+type Model struct {
+	session *ort.DynamicAdvancedSession
+	config  *ModelConfig
+}
+
+func NewModel(cfg *ModelConfig) (*Model, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("ppdoclayoutv3: config is required")
+	}
+	if cfg.InputSize <= 0 {
+		cfg.InputSize = 800
+	}
+	if cfg.ScoreThreshold <= 0 {
+		cfg.ScoreThreshold = 0.3
+	}
+
+	// PP-DocLayoutV3 takes 3 inputs and 1 output.
+	inputNames := []string{"im_shape", "image", "scale_factor"}
+	outputName := cfg.OnnxConfig.OutputName
+	if outputName == "" {
+		outputName = "multiclass_nms3_0.tmp_0"
+	}
+
+	session, err := ort.NewDynamicAdvancedSession(cfg.ModelPath,
+		inputNames,
+		[]string{outputName},
+		cfg.OnnxConfig.Options)
+	if err != nil {
+		return nil, err
+	}
+	return &Model{session: session, config: cfg}, nil
+}
+
+func (m *Model) Close() error {
+	if m.session != nil {
+		return m.session.Destroy()
+	}
+	return nil
+}
+
+// Detect runs PP-DocLayoutV3 and returns layout boxes sorted by reading order.
+func (m *Model) Detect(img image.Image) ([]detect.Box, error) {
+	bounds := img.Bounds()
+	origW := bounds.Max.X - bounds.Min.X
+	origH := bounds.Max.Y - bounds.Min.Y
+	if origW <= 0 || origH <= 0 {
+		return nil, nil
+	}
+
+	size := m.config.InputSize
+	scaleH := float32(size) / float32(origH)
+	scaleW := float32(size) / float32(origW)
+
+	// Resize to size×size (non-aspect-preserving) and normalize with ImageNet stats.
+	resized := utils.BilinearResize(img, size, size)
+
+	const (
+		meanR, meanG, meanB = float32(0.485), float32(0.406), float32(0.456)
+		stdR, stdG, stdB    = float32(0.229), float32(0.225), float32(0.224)
+	)
+
+	imageData := make([]float32, 3*size*size)
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			pix := resized.RGBAAt(x, y)
+			rv := float32(pix.R) / 255.0
+			gv := float32(pix.G) / 255.0
+			bv := float32(pix.B) / 255.0
+			idx := y*size + x
+			imageData[0*size*size+idx] = (rv - meanR) / stdR
+			imageData[1*size*size+idx] = (gv - meanG) / stdG
+			imageData[2*size*size+idx] = (bv - meanB) / stdB
+		}
+	}
+
+	// im_shape tensor: [1][2]float32 = [[800, 800]]
+	imShapeTensor, err := ort.NewTensor(ort.NewShape(1, 2), []float32{float32(size), float32(size)})
+	if err != nil {
+		return nil, fmt.Errorf("ppdoclayoutv3 im_shape tensor: %w", err)
+	}
+	defer func() { _ = imShapeTensor.Destroy() }()
+
+	// image tensor: [1][3][size][size]float32
+	imageTensor, err := ort.NewTensor(ort.NewShape(1, 3, int64(size), int64(size)), imageData)
+	if err != nil {
+		return nil, fmt.Errorf("ppdoclayoutv3 image tensor: %w", err)
+	}
+	defer func() { _ = imageTensor.Destroy() }()
+
+	// scale_factor tensor: [1][2]float32 = [[scale_h, scale_w]]
+	scaleTensor, err := ort.NewTensor(ort.NewShape(1, 2), []float32{scaleH, scaleW})
+	if err != nil {
+		return nil, fmt.Errorf("ppdoclayoutv3 scale_factor tensor: %w", err)
+	}
+	defer func() { _ = scaleTensor.Destroy() }()
+
+	outputs := make([]ort.Value, 1)
+	if err := m.session.Run([]ort.Value{imShapeTensor, imageTensor, scaleTensor}, outputs); err != nil {
+		return nil, fmt.Errorf("ppdoclayoutv3 inference: %w", err)
+	}
+	outTensor, ok := outputs[0].(*ort.Tensor[float32])
+	if !ok {
+		_ = outputs[0].Destroy()
+		return nil, fmt.Errorf("ppdoclayoutv3: unexpected output type")
+	}
+	defer func() { _ = outTensor.Destroy() }()
+
+	raw := outTensor.GetData()
+	outShape := outTensor.GetShape()
+
+	// Output shape: [N, 7] — each row: [label_id, score, xmin, ymin, xmax, ymax, read_order]
+	if len(outShape) < 2 || outShape[1] != 7 {
+		return nil, fmt.Errorf("ppdoclayoutv3: unexpected output shape %v", outShape)
+	}
+	N := int(outShape[0])
+
+	type rawBox struct {
+		classID   int
+		score     float64
+		xmin, ymin, xmax, ymax float64
+		order     int
+	}
+	var candidates []rawBox
+	for i := 0; i < N; i++ {
+		row := raw[i*7 : i*7+7]
+		score := float64(row[1])
+		if float32(score) < m.config.ScoreThreshold {
+			continue
+		}
+		candidates = append(candidates, rawBox{
+			classID: int(row[0]),
+			score:   score,
+			xmin:    float64(row[2]),
+			ymin:    float64(row[3]),
+			xmax:    float64(row[4]),
+			ymax:    float64(row[5]),
+			order:   int(row[6]),
+		})
+	}
+
+	// Sort by reading order.
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].order < candidates[j].order
+	})
+
+	boxes := make([]detect.Box, len(candidates))
+	for i, c := range candidates {
+		// Axis-aligned box → [TL, TR, BR, BL] quad.
+		xMin := utils.ClampInt(int(c.xmin), 0, origW-1)
+		yMin := utils.ClampInt(int(c.ymin), 0, origH-1)
+		xMax := utils.ClampInt(int(c.xmax), 0, origW-1)
+		yMax := utils.ClampInt(int(c.ymax), 0, origH-1)
+		quad := [4][2]int{
+			{xMin, yMin}, // TL
+			{xMax, yMin}, // TR
+			{xMax, yMax}, // BR
+			{xMin, yMax}, // BL
+		}
+		boxes[i] = detect.Box{
+			Quad:    quad,
+			Score:   c.score,
+			ClassID: c.classID,
+			Order:   c.order,
+		}
+	}
+	return boxes, nil
+}

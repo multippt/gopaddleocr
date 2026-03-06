@@ -61,18 +61,16 @@ func (s *Server) handleDetect(c *gin.Context) {
 	}
 
 	t0 := time.Now()
-	quads, err := s.ocrEngine.DetectOnly(img)
+	detBoxes, err := s.ocrEngine.DetectOnly(img)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
 		return
 	}
 	elapsed := float64(time.Since(t0).Microseconds()) / 1000.0
 
-	if quads == nil {
-		quads = [][4][2]int{}
-	}
-	boxes := make([][][2]int, len(quads))
-	for i, q := range quads {
+	boxes := make([][][2]int, len(detBoxes))
+	for i, b := range detBoxes {
+		q := b.Quad
 		boxes[i] = [][2]int{q[0], q[1], q[2], q[3]}
 	}
 	c.JSON(http.StatusOK, DetectResponse{Boxes: boxes, ElapsedMs: elapsed})
@@ -121,18 +119,16 @@ func (s *Server) handleSessionDetect(c *gin.Context) {
 	}
 
 	t0 := time.Now()
-	quads, err := s.ocrEngine.DetectOnly(img)
+	detBoxes, err := s.ocrEngine.DetectOnly(img)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
 		return
 	}
 	elapsed := float64(time.Since(t0).Microseconds()) / 1000.0
 
-	if quads == nil {
-		quads = [][4][2]int{}
-	}
-	boxes := make([][][2]int, len(quads))
-	for i, q := range quads {
+	boxes := make([][][2]int, len(detBoxes))
+	for i, b := range detBoxes {
+		q := b.Quad
 		boxes[i] = [][2]int{q[0], q[1], q[2], q[3]}
 	}
 	c.JSON(http.StatusOK, DetectResponse{Boxes: boxes, ElapsedMs: elapsed})
