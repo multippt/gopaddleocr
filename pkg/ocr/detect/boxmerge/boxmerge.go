@@ -7,8 +7,8 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/multippt/gopaddleocr/pkg/ocr/common"
 	"github.com/multippt/gopaddleocr/pkg/ocr/detect"
-	"github.com/multippt/gopaddleocr/pkg/ocr/onnx"
 )
 
 const ModelName = "box-merge"
@@ -25,7 +25,7 @@ const (
 
 // Config configures the BoxMerge detector (strategy parameters only).
 type Config struct {
-	onnx.BaseModelConfig
+	common.BaseModelConfig
 
 	Strategy Strategy
 
@@ -44,10 +44,7 @@ type Model struct {
 	parentDetector detect.Detector
 }
 
-func NewModel(childDetector, parentDetector detect.Detector) (*Model, error) {
-	if childDetector == nil {
-		return nil, fmt.Errorf("boxmerge: ChildDetector is required")
-	}
+func NewModel(childDetector, parentDetector detect.Detector) *Model {
 	return &Model{
 		config: &Config{
 			MinOverlapRatio:  0.8,
@@ -56,10 +53,22 @@ func NewModel(childDetector, parentDetector detect.Detector) (*Model, error) {
 		},
 		childDetector:  childDetector,
 		parentDetector: parentDetector,
-	}, nil
+	}
 }
 
-func (m *Model) Init(_ onnx.ModelConfig) error { return nil }
+func (m *Model) GetName() string { return ModelName }
+
+func (m *Model) GetDefaultConfig() common.ModelConfig {
+	return &Config{
+		Strategy:         DocLayout,
+		MinOverlapRatio:  0.8,
+		MaxMergeDistance: 20,
+		MaxSizeRatio:     1.5,
+		BaseModelConfig:  common.BaseModelConfig{},
+	}
+}
+
+func (m *Model) Init(_ common.ModelConfig) error { return nil }
 
 func (m *Model) Close() error {
 	var first error

@@ -3,8 +3,9 @@ package paddleocr
 import (
 	"fmt"
 	"image"
+	"path/filepath"
 
-	"github.com/multippt/gopaddleocr/pkg/ocr/onnx"
+	"github.com/multippt/gopaddleocr/pkg/ocr/common"
 	"github.com/multippt/gopaddleocr/pkg/ocr/utils"
 	ort "github.com/yalue/onnxruntime_go"
 )
@@ -18,7 +19,7 @@ type ModelConfig struct {
 	Mean      [3]float64
 	Std       [3]float64
 
-	onnx.BaseModelConfig
+	common.BaseModelConfig
 }
 
 // ---------------------------------------------------------------------------
@@ -34,7 +35,26 @@ func NewModel() *Model {
 	return &Model{}
 }
 
-func (m *Model) Init(config onnx.ModelConfig) error {
+func (m *Model) GetName() string { return ModelName }
+
+func (m *Model) GetDefaultConfig() common.ModelConfig {
+	return &ModelConfig{
+		Height:    48,
+		Width:     192,
+		Threshold: 0.9,
+		Mean:      [3]float64{0.5, 0.5, 0.5},
+		Std:       [3]float64{0.5, 0.5, 0.5},
+		BaseModelConfig: common.BaseModelConfig{
+			OnnxConfig: common.Config{
+				ModelPath:  filepath.Join("./models", "ch_ppocr_mobile_v2.0_cls_infer.onnx"),
+				InputName:  "x",
+				OutputName: "save_infer_model/scale_0.tmp_1",
+			},
+		},
+	}
+}
+
+func (m *Model) Init(config common.ModelConfig) error {
 	cfg, ok := config.(*ModelConfig)
 	if !ok {
 		return fmt.Errorf("classify/paddleocr: expected *ModelConfig, got %T", config)

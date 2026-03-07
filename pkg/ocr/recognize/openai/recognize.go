@@ -10,7 +10,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/multippt/gopaddleocr/pkg/ocr/onnx"
+	"github.com/multippt/gopaddleocr/pkg/ocr/common"
 	"github.com/multippt/gopaddleocr/pkg/ocr/recognize"
 	"github.com/multippt/gopaddleocr/pkg/ocr/utils"
 )
@@ -23,7 +23,7 @@ type ModelConfig struct {
 	Model        string // e.g. "glm-4v-plus"
 	SystemPrompt string // default: "You are an OCR assistant. Output only the exact text you see, with no explanation."
 	UserPrompt   string // default: "Please transcribe all text in this image exactly as it appears."
-	onnx.BaseModelConfig
+	common.BaseModelConfig
 }
 
 // ---------------------------------------------------------------------------
@@ -39,7 +39,20 @@ func NewModel() *Model {
 	return &Model{client: &http.Client{}}
 }
 
-func (m *Model) Init(config onnx.ModelConfig) error {
+func (m *Model) GetName() string { return ModelName }
+
+func (m *Model) GetDefaultConfig() common.ModelConfig {
+	return &ModelConfig{
+		Endpoint:        "http://localhost:8000/v1",
+		APIKey:          "",
+		Model:           "zai-org/GLM-OCR",
+		SystemPrompt:    "You are an OCR assistant. Output only the exact text you see, with no explanation.",
+		UserPrompt:      "Please transcribe all text in this image exactly as it appears.",
+		BaseModelConfig: common.BaseModelConfig{},
+	}
+}
+
+func (m *Model) Init(config common.ModelConfig) error {
 	cfg, ok := config.(*ModelConfig)
 	if !ok {
 		return fmt.Errorf("openai recognizer: expected *ModelConfig, got %T", config)

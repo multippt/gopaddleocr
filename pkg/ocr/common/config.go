@@ -1,6 +1,13 @@
-package onnx
+package common
 
 import ort "github.com/yalue/onnxruntime_go"
+
+type Model interface {
+	GetName() string
+	Init(config ModelConfig) error
+	GetDefaultConfig() ModelConfig
+	Close() error
+}
 
 type Config struct {
 	ModelPath  string

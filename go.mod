@@ -7,6 +7,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/yalue/onnxruntime_go v1.26.0
 	golang.org/x/image v0.36.0
+	golang.org/x/sync v0.19.0
 )
 
 require (

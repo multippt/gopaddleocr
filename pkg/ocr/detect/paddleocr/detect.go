@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"image"
 	"math"
+	"path/filepath"
 
+	"github.com/multippt/gopaddleocr/pkg/ocr/common"
 	"github.com/multippt/gopaddleocr/pkg/ocr/detect"
-	"github.com/multippt/gopaddleocr/pkg/ocr/onnx"
 	"github.com/multippt/gopaddleocr/pkg/ocr/utils"
 	ort "github.com/yalue/onnxruntime_go"
 )
@@ -22,7 +23,7 @@ type ModelConfig struct {
 	UnclipRatio     float64
 	MinArea         int
 
-	onnx.BaseModelConfig
+	common.BaseModelConfig
 }
 
 // ---------------------------------------------------------------------------
@@ -38,7 +39,28 @@ func NewModel() *Model {
 	return &Model{}
 }
 
-func (m *Model) Init(config onnx.ModelConfig) error {
+func (m *Model) GetName() string { return ModelName }
+
+func (m *Model) GetDefaultConfig() common.ModelConfig {
+	return &ModelConfig{
+		LimitSideLength: 1280,
+		Mean:            [3]float32{0.485, 0.456, 0.406},
+		Std:             [3]float32{0.229, 0.224, 0.225},
+		Thresh:          0.3,
+		BoxThresh:       0.6,
+		UnclipRatio:     2.0,
+		MinArea:         16,
+		BaseModelConfig: common.BaseModelConfig{
+			OnnxConfig: common.Config{
+				ModelPath:  filepath.Join("./models", "ch_PP-OCRv5_server_det.onnx"),
+				InputName:  "x",
+				OutputName: "fetch_name_0",
+			},
+		},
+	}
+}
+
+func (m *Model) Init(config common.ModelConfig) error {
 	cfg, ok := config.(*ModelConfig)
 	if !ok {
 		return fmt.Errorf("detect/paddleocr: expected *ModelConfig, got %T", config)

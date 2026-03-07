@@ -44,17 +44,21 @@ func (s *Server) Start(listenAddr string) {
 	defer ort.DestroyEnvironment()
 
 	// Build and preload the OCR engine in the background.
-	ocrEngine := ocr.NewEngine(ocr.NewDefaultConfig())
+	ocrEngine := ocr.NewEngine()
 	go func() {
-		if err := ocrEngine.Load(); err != nil {
+		if err := ocrEngine.Init(); err != nil {
 			log.Printf("engine preload error: %v", err)
 		} else {
 			log.Println("engine loaded successfully")
 		}
 	}()
+	defer func() {
+		_ = ocrEngine.Close()
+	}()
 	s.ocrEngine = ocrEngine
 
 	s.server = gin.Default()
+	_ = s.server.SetTrustedProxies(nil)
 	s.registerHandlers()
 
 	log.Printf("OCR service listening on %s", listenAddr)

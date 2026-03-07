@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"image"
 	"math"
+	"path/filepath"
 
-	"github.com/multippt/gopaddleocr/pkg/ocr/onnx"
+	"github.com/multippt/gopaddleocr/pkg/ocr/common"
 	"github.com/multippt/gopaddleocr/pkg/ocr/recognize"
 	"github.com/multippt/gopaddleocr/pkg/ocr/utils"
 	ort "github.com/yalue/onnxruntime_go"
@@ -20,7 +21,7 @@ type ModelConfig struct {
 	Mean   [3]float64
 	Std    [3]float64
 
-	onnx.BaseModelConfig
+	common.BaseModelConfig
 }
 
 // ---------------------------------------------------------------------------
@@ -37,7 +38,25 @@ func NewModel() *Model {
 	return &Model{}
 }
 
-func (m *Model) Init(config onnx.ModelConfig) error {
+func (m *Model) GetName() string { return ModelName }
+
+func (m *Model) GetDefaultConfig() common.ModelConfig {
+	return &ModelConfig{
+		DictPath: filepath.Join("./models", "ppocr_keys_v5.txt"),
+		Height:   48,
+		Mean:     [3]float64{0.5, 0.5, 0.5},
+		Std:      [3]float64{0.5, 0.5, 0.5},
+		BaseModelConfig: common.BaseModelConfig{
+			OnnxConfig: common.Config{
+				ModelPath:  filepath.Join("./models", "ch_PP-OCRv5_rec_server_infer.onnx"),
+				InputName:  "x",
+				OutputName: "fetch_name_0",
+			},
+		},
+	}
+}
+
+func (m *Model) Init(config common.ModelConfig) error {
 	cfg, ok := config.(*ModelConfig)
 	if !ok {
 		return fmt.Errorf("recognize/paddleocr: expected *ModelConfig, got %T", config)

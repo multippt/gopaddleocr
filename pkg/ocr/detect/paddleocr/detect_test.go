@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/multippt/gopaddleocr/pkg/ocr/onnx"
+	"github.com/multippt/gopaddleocr/pkg/ocr/common"
 )
 
 // testDetConfig is used by tests that need a ModelConfig without importing ocr (avoids cycle).
@@ -17,8 +17,8 @@ var testDetConfig = &ModelConfig{
 	BoxThresh:       0.6,
 	UnclipRatio:     2.0,
 	MinArea:         16,
-	BaseModelConfig: onnx.BaseModelConfig{
-		OnnxConfig: onnx.Config{
+	BaseModelConfig: common.BaseModelConfig{
+		OnnxConfig: common.Config{
 			InputName:  "x",
 			OutputName: "fetch_name_0",
 		},

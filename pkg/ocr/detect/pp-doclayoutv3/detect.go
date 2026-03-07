@@ -3,10 +3,11 @@ package ppdoclayoutv3
 import (
 	"fmt"
 	"image"
+	"path/filepath"
 	"sort"
 
+	"github.com/multippt/gopaddleocr/pkg/ocr/common"
 	"github.com/multippt/gopaddleocr/pkg/ocr/detect"
-	"github.com/multippt/gopaddleocr/pkg/ocr/onnx"
 	"github.com/multippt/gopaddleocr/pkg/ocr/utils"
 	ort "github.com/yalue/onnxruntime_go"
 )
@@ -16,7 +17,7 @@ const ModelName = "pp-doclayoutv3"
 type ModelConfig struct {
 	InputSize      int     // default 800
 	ScoreThreshold float32 // default 0.3
-	onnx.BaseModelConfig
+	common.BaseModelConfig
 }
 
 // ---------------------------------------------------------------------------
@@ -32,7 +33,19 @@ func NewModel() *Model {
 	return &Model{}
 }
 
-func (m *Model) Init(config onnx.ModelConfig) error {
+func (m *Model) GetName() string { return ModelName }
+
+func (m *Model) GetDefaultConfig() common.ModelConfig {
+	return &ModelConfig{
+		BaseModelConfig: common.BaseModelConfig{
+			OnnxConfig: common.Config{
+				ModelPath: filepath.Join("./models", "PP-DocLayoutV3.onnx"),
+			},
+		},
+	}
+}
+
+func (m *Model) Init(config common.ModelConfig) error {
 	cfg, ok := config.(*ModelConfig)
 	if !ok {
 		return fmt.Errorf("ppdoclayoutv3: expected *ModelConfig, got %T", config)
@@ -44,16 +57,13 @@ func (m *Model) Init(config onnx.ModelConfig) error {
 		cfg.ScoreThreshold = 0.3
 	}
 
-	// PP-DocLayoutV3 takes 3 inputs and 1 output.
+	// PP-DocLayoutV3 takes 3 inputs and 3 outputs; only fetch_name_0 contains boxes.
 	inputNames := []string{"im_shape", "image", "scale_factor"}
-	outputName := cfg.OnnxConfig.OutputName
-	if outputName == "" {
-		outputName = "multiclass_nms3_0.tmp_0"
-	}
+	outputNames := []string{"fetch_name_0", "fetch_name_1", "fetch_name_2"}
 
 	session, err := ort.NewDynamicAdvancedSession(cfg.OnnxConfig.ModelPath,
 		inputNames,
-		[]string{outputName},
+		outputNames,
 		cfg.OnnxConfig.Options)
 	if err != nil {
 		return err
@@ -87,8 +97,8 @@ func (m *Model) Detect(img image.Image) ([]detect.Box, error) {
 	resized := utils.BilinearResize(img, size, size)
 
 	const (
-		meanR, meanG, meanB = float32(0.485), float32(0.406), float32(0.456)
-		stdR, stdG, stdB    = float32(0.229), float32(0.225), float32(0.224)
+		meanR, meanG, meanB = float32(0.485), float32(0.456), float32(0.406)
+		stdR, stdG, stdB    = float32(0.229), float32(0.224), float32(0.225)
 	)
 
 	imageData := make([]float32, 3*size*size)
@@ -126,9 +136,15 @@ func (m *Model) Detect(img image.Image) ([]detect.Box, error) {
 	}
 	defer func() { _ = scaleTensor.Destroy() }()
 
-	outputs := make([]ort.Value, 1)
+	outputs := make([]ort.Value, 3)
 	if err := m.session.Run([]ort.Value{imShapeTensor, imageTensor, scaleTensor}, outputs); err != nil {
 		return nil, fmt.Errorf("ppdoclayoutv3 inference: %w", err)
+	}
+	// outputs[1] and outputs[2] are unused auxiliary outputs.
+	for _, v := range outputs[1:] {
+		if v != nil {
+			_ = v.Destroy()
+		}
 	}
 	outTensor, ok := outputs[0].(*ort.Tensor[float32])
 	if !ok {
@@ -147,10 +163,10 @@ func (m *Model) Detect(img image.Image) ([]detect.Box, error) {
 	N := int(outShape[0])
 
 	type rawBox struct {
-		classID   int
-		score     float64
+		classID                int
+		score                  float64
 		xmin, ymin, xmax, ymax float64
-		order     int
+		order                  int
 	}
 	var candidates []rawBox
 	for i := 0; i < N; i++ {
