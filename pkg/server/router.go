@@ -8,12 +8,15 @@ import (
 )
 
 type Server struct {
-	server    *gin.Engine
-	ocrEngine *ocr.Engine
+	server         *gin.Engine
+	ocrEngine      *ocr.Engine
+	sessionManager *SessionManager
 }
 
 func NewServer() *Server {
-	return &Server{}
+	return &Server{
+		sessionManager: NewSessionManager(),
+	}
 }
 
 func (s *Server) registerHandlers() {

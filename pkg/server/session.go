@@ -8,25 +8,36 @@ import (
 	"github.com/google/uuid"
 )
 
-// sessions holds in-memory session data: session_id → image.Image
-var sessions sync.Map
-
-func storeSession(id string, img image.Image) {
-	sessions.Store(id, img)
+// SessionManager holds in-memory session data: session_id → image.Image
+type SessionManager struct {
+	sessions sync.Map
 }
 
-func deleteSession(id string) {
-	sessions.Delete(id)
+// NewSessionManager returns a new SessionManager.
+func NewSessionManager() *SessionManager {
+	return &SessionManager{}
 }
 
-func getSession(id string) (image.Image, error) {
-	v, ok := sessions.Load(id)
+// Store saves an image for the given session ID.
+func (m *SessionManager) Store(id string, img image.Image) {
+	m.sessions.Store(id, img)
+}
+
+// Delete removes the session for the given ID.
+func (m *SessionManager) Delete(id string) {
+	m.sessions.Delete(id)
+}
+
+// Get returns the image for the given session ID, or an error if not found.
+func (m *SessionManager) Get(id string) (image.Image, error) {
+	v, ok := m.sessions.Load(id)
 	if !ok {
 		return nil, fmt.Errorf("session %s not found", id)
 	}
 	return v.(image.Image), nil
 }
 
-func newSessionID() string {
+// NewID returns a new unique session ID.
+func (m *SessionManager) NewID() string {
 	return uuid.New().String()
 }

@@ -91,15 +91,15 @@ func (s *Server) handleSessionCreate(c *gin.Context) {
 	// Honour optional existing session_id from form or JSON.
 	sid := c.PostForm("session_id")
 	if sid == "" {
-		sid = newSessionID()
+		sid = s.sessionManager.NewID()
 	}
-	storeSession(sid, img)
+	s.sessionManager.Store(sid, img)
 	c.JSON(http.StatusOK, SessionResponse{SessionID: sid})
 }
 
 func (s *Server) handleSessionDelete(c *gin.Context) {
 	sid := c.PostForm("session_id")
-	deleteSession(sid)
+	s.sessionManager.Delete(sid)
 	c.JSON(http.StatusOK, SessionResponse{SessionID: sid})
 }
 
@@ -112,7 +112,7 @@ func (s *Server) handleSessionDetect(c *gin.Context) {
 		return
 	}
 
-	img, err := getSession(req.SessionID)
+	img, err := s.sessionManager.Get(req.SessionID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"detail": err.Error()})
 		return
@@ -143,7 +143,7 @@ func (s *Server) handleSessionOCR(c *gin.Context) {
 		return
 	}
 
-	img, err := getSession(req.SessionID)
+	img, err := s.sessionManager.Get(req.SessionID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"detail": err.Error()})
 		return
