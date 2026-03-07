@@ -19,6 +19,7 @@ import (
 	"github.com/multippt/gopaddleocr/pkg/ocr/recognize"
 	openairec "github.com/multippt/gopaddleocr/pkg/ocr/recognize/openai"
 	recognizepaddleocr "github.com/multippt/gopaddleocr/pkg/ocr/recognize/paddleocr"
+	"github.com/multippt/gopaddleocr/pkg/ocr/utils"
 )
 
 // Result is a single detected text region.
@@ -168,7 +169,7 @@ func (e *Engine) RunOCR(img image.Image) ([]Result, error) {
 }
 
 // recognizeFlat runs cls+rec on a single box (no children).
-func (e *Engine) recognizeFlat(img image.Image, box detect.Box) *Result {
+func (e *Engine) recognizeFlat(img image.Image, box utils.Box) *Result {
 	quad := box.Quad
 
 	flip, err := e.workflow.classifier.Classify(img, quad)
@@ -192,7 +193,7 @@ func (e *Engine) recognizeFlat(img image.Image, box detect.Box) *Result {
 // recognizeHierarchical handles a parent box with children.
 // RecognitionModel=="GLM-OCR": rec on parent box only.
 // Default (PaddleOCR): cls+rec on children, aggregate per parent.
-func (e *Engine) recognizeHierarchical(img image.Image, parent detect.Box) *Result {
+func (e *Engine) recognizeHierarchical(img image.Image, parent utils.Box) *Result {
 	parentQuad := parent.Quad
 	outBox := [][2]int{parentQuad[0], parentQuad[1], parentQuad[2], parentQuad[3]}
 
@@ -231,7 +232,7 @@ func (e *Engine) recognizeHierarchical(img image.Image, parent detect.Box) *Resu
 }
 
 // DetectOnly runs only the detection model and returns boxes.
-func (e *Engine) DetectOnly(img image.Image) ([]detect.Box, error) {
+func (e *Engine) DetectOnly(img image.Image) ([]utils.Box, error) {
 	if err := e.Init(); err != nil {
 		return nil, err
 	}

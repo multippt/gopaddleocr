@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 
 	"github.com/multippt/gopaddleocr/pkg/ocr/common"
-	"github.com/multippt/gopaddleocr/pkg/ocr/detect"
 	"github.com/multippt/gopaddleocr/pkg/ocr/utils"
 	ort "github.com/yalue/onnxruntime_go"
 )
@@ -85,7 +84,7 @@ func (m *Model) Close() error {
 }
 
 // Detect performs detection and returns ordered boxes in original image space.
-func (m *Model) Detect(img image.Image) ([]detect.Box, error) {
+func (m *Model) Detect(img image.Image) ([]utils.Box, error) {
 	bounds := img.Bounds()
 	origW := bounds.Max.X - bounds.Min.X
 	origH := bounds.Max.Y - bounds.Min.Y
@@ -193,7 +192,7 @@ func (m *Model) Detect(img image.Image) ([]detect.Box, error) {
 // Postprocessing
 // ---------------------------------------------------------------------------
 
-func (m *Model) postprocess(probData []float32, padH, padW, resH, resW, origH, origW int) []detect.Box {
+func (m *Model) postprocess(probData []float32, padH, padW, resH, resW, origH, origW int) []utils.Box {
 	// Build binary mask.
 	mask := make([]bool, padH*padW)
 	for i, v := range probData {
@@ -210,7 +209,7 @@ func (m *Model) postprocess(probData []float32, padH, padW, resH, resW, origH, o
 	sx := float64(origW) / float64(resW)
 	sy := float64(origH) / float64(resH)
 
-	var boxes []detect.Box
+	var boxes []utils.Box
 
 	for _, comp := range components {
 		if len(comp) < m.config.MinArea {
@@ -253,7 +252,7 @@ func (m *Model) postprocess(probData []float32, padH, padW, resH, resW, origH, o
 		}
 		finalRect := minAreaRect(uHull)
 
-		// Order and scale 4 corners to original image space.
+		// Order and scale 4 corners to the original image space.
 		corners := [4][2]float64{
 			{finalRect[0].X, finalRect[0].Y},
 			{finalRect[1].X, finalRect[1].Y},
@@ -266,7 +265,7 @@ func (m *Model) postprocess(probData []float32, padH, padW, resH, resW, origH, o
 			quad[i][0] = utils.ClampInt(int(math.Round(p[0]*sx)), 0, origW-1)
 			quad[i][1] = utils.ClampInt(int(math.Round(p[1]*sy)), 0, origH-1)
 		}
-		boxes = append(boxes, detect.Box{Quad: quad, Score: boxScore(probData, padW, rectPoly), ClassID: -1, Order: -1})
+		boxes = append(boxes, utils.Box{Quad: quad, Score: boxScore(probData, padW, rectPoly), ClassID: -1, Order: -1})
 	}
 
 	return boxes

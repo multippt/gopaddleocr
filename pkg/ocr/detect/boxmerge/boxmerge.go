@@ -9,6 +9,7 @@ import (
 
 	"github.com/multippt/gopaddleocr/pkg/ocr/common"
 	"github.com/multippt/gopaddleocr/pkg/ocr/detect"
+	"github.com/multippt/gopaddleocr/pkg/ocr/utils"
 )
 
 const ModelName = "box-merge"
@@ -84,7 +85,7 @@ func (m *Model) Close() error {
 }
 
 // Detect runs the configured merge strategy and returns parent boxes with children.
-func (m *Model) Detect(img image.Image) ([]detect.Box, error) {
+func (m *Model) Detect(img image.Image) ([]utils.Box, error) {
 	switch m.config.Strategy {
 	case DocLayout:
 		return m.detectDocLayout(img)
@@ -99,10 +100,10 @@ func (m *Model) Detect(img image.Image) ([]detect.Box, error) {
 // DocLayout strategy
 // ---------------------------------------------------------------------------
 
-func (m *Model) detectDocLayout(img image.Image) ([]detect.Box, error) {
+func (m *Model) detectDocLayout(img image.Image) ([]utils.Box, error) {
 	// Run child and parent detectors in parallel.
 	var (
-		childBoxes, parentBoxes []detect.Box
+		childBoxes, parentBoxes []utils.Box
 		childErr, parentErr     error
 		wg                      sync.WaitGroup
 	)
@@ -129,29 +130,29 @@ func (m *Model) detectDocLayout(img image.Image) ([]detect.Box, error) {
 
 // assignChildrenToParents places each child into the parent with largest overlap
 // (if >= MinOverlapRatio of child area). Unmatched children become their own parents.
-func (m *Model) assignChildrenToParents(children, parents []detect.Box) []detect.Box {
+func (m *Model) assignChildrenToParents(children, parents []utils.Box) []utils.Box {
 	// Track which children are assigned.
 	assigned := make([]bool, len(children))
 	// For each parent, collect assigned children.
-	parentChildren := make([][]detect.Box, len(parents))
+	parentChildren := make([][]utils.Box, len(parents))
 
 	for ci, child := range children {
-		childAABB := detect.BoxAABB(child.Quad)
+		childAABB := child.Quad.AABB()
 		childArea := aabbArea(childAABB)
 		if childArea <= 0 {
 			assigned[ci] = true // degenerate box, skip
 			continue
 		}
-		childOrient := boxOrientation(child.Quad)
+		childOrient := boxOrientation(child)
 
 		bestParent := -1
 		bestOverlap := 0.0
 		for pi, parent := range parents {
-			parentOrient := boxOrientation(parent.Quad)
+			parentOrient := boxOrientation(parent)
 			if childOrient != parentOrient {
 				continue
 			}
-			parentAABB := detect.BoxAABB(parent.Quad)
+			parentAABB := parent.Quad.AABB()
 			overlap := aabbIntersectionArea(childAABB, parentAABB)
 			ratio := overlap / childArea
 			if ratio >= m.config.MinOverlapRatio && overlap > bestOverlap {
@@ -166,7 +167,7 @@ func (m *Model) assignChildrenToParents(children, parents []detect.Box) []detect
 	}
 
 	// Build result: parents with their children.
-	var result []detect.Box
+	var result []utils.Box
 	for pi, parent := range parents {
 		if len(parentChildren[pi]) == 0 {
 			continue // skip parents with no children
@@ -178,12 +179,12 @@ func (m *Model) assignChildrenToParents(children, parents []detect.Box) []detect
 	// Orphan children become self-parents.
 	for ci, child := range children {
 		if !assigned[ci] {
-			orphanParent := detect.Box{
+			orphanParent := utils.Box{
 				Quad:     child.Quad,
 				Score:    child.Score,
 				ClassID:  -1,
 				Order:    -1,
-				Children: []detect.Box{child},
+				Children: []utils.Box{child},
 			}
 			result = append(result, orphanParent)
 		}
@@ -196,7 +197,7 @@ func (m *Model) assignChildrenToParents(children, parents []detect.Box) []detect
 // Statistical strategy
 // ---------------------------------------------------------------------------
 
-func (m *Model) detectStatistical(img image.Image) ([]detect.Box, error) {
+func (m *Model) detectStatistical(img image.Image) ([]utils.Box, error) {
 	children, err := m.childDetector.Detect(img)
 	if err != nil {
 		return nil, fmt.Errorf("boxmerge child detect: %w", err)
@@ -209,7 +210,7 @@ func (m *Model) detectStatistical(img image.Image) ([]detect.Box, error) {
 }
 
 // clusterBoxes groups child boxes by proximity, text size, and orientation.
-func (m *Model) clusterBoxes(boxes []detect.Box) []detect.Box {
+func (m *Model) clusterBoxes(boxes []utils.Box) []utils.Box {
 	n := len(boxes)
 	if n == 0 {
 		return nil
@@ -242,7 +243,7 @@ func (m *Model) clusterBoxes(boxes []detect.Box) []detect.Box {
 	}
 	infos := make([]boxInfo, n)
 	for i, b := range boxes {
-		aabb := detect.BoxAABB(b.Quad)
+		aabb := b.Quad.AABB()
 		w := float64(aabb[2] - aabb[0])
 		h := float64(aabb[3] - aabb[1])
 		// Text size is the smaller dimension (line height for horizontal, line width for vertical).
@@ -285,9 +286,9 @@ func (m *Model) clusterBoxes(boxes []detect.Box) []detect.Box {
 	}
 
 	// Build parent boxes from clusters.
-	var result []detect.Box
+	var result []utils.Box
 	for _, indices := range groups {
-		children := make([]detect.Box, len(indices))
+		children := make([]utils.Box, len(indices))
 		for i, idx := range indices {
 			children[i] = boxes[idx]
 		}
@@ -310,10 +311,10 @@ func (m *Model) clusterBoxes(boxes []detect.Box) []detect.Box {
 			}
 		}
 
-		// Sort children by reading order (top-to-bottom for horizontal, left-to-right for vertical).
+		// Sort children by reading order (top-to-bottom for horizontal, right-to-left for vertical).
 		sort.Slice(children, func(a, b int) bool {
-			aabb1 := detect.BoxAABB(children[a].Quad)
-			aabb2 := detect.BoxAABB(children[b].Quad)
+			aabb1 := children[a].Quad.AABB()
+			aabb2 := children[b].Quad.AABB()
 			if infos[indices[0]].orient == 0 {
 				// Horizontal: sort by Y center, then X.
 				cy1 := (aabb1[1] + aabb1[3]) / 2
@@ -323,11 +324,11 @@ func (m *Model) clusterBoxes(boxes []detect.Box) []detect.Box {
 				}
 				return (aabb1[0] + aabb1[2]) < (aabb2[0] + aabb2[2])
 			}
-			// Vertical: sort by X center, then Y.
+			// Vertical (CJK): right-to-left columns, then top-to-bottom within column.
 			cx1 := (aabb1[0] + aabb1[2]) / 2
 			cx2 := (aabb2[0] + aabb2[2]) / 2
 			if cx1 != cx2 {
-				return cx1 < cx2
+				return cx1 > cx2
 			}
 			return (aabb1[1] + aabb1[3]) < (aabb2[1] + aabb2[3])
 		})
@@ -338,7 +339,7 @@ func (m *Model) clusterBoxes(boxes []detect.Box) []detect.Box {
 			{parentAABB[2], parentAABB[3]}, // BR
 			{parentAABB[0], parentAABB[3]}, // BL
 		}
-		result = append(result, detect.Box{
+		result = append(result, utils.Box{
 			Quad:     parentQuad,
 			Score:    children[0].Score,
 			ClassID:  -1,
@@ -349,8 +350,8 @@ func (m *Model) clusterBoxes(boxes []detect.Box) []detect.Box {
 
 	// Sort parents by reading order (top-left first).
 	sort.Slice(result, func(i, j int) bool {
-		ai := detect.BoxAABB(result[i].Quad)
-		aj := detect.BoxAABB(result[j].Quad)
+		ai := result[i].Quad.AABB()
+		aj := result[j].Quad.AABB()
 		cy1 := (ai[1] + ai[3]) / 2
 		cy2 := (aj[1] + aj[3]) / 2
 		if cy1 != cy2 {
@@ -418,8 +419,8 @@ func aabbGap(a, b [4]int) float64 {
 }
 
 // boxOrientation returns 0 for horizontal (width >= height) and 1 for vertical.
-func boxOrientation(q [4][2]int) int {
-	aabb := detect.BoxAABB(q)
+func boxOrientation(q utils.Box) int {
+	aabb := q.Quad.AABB()
 	w := aabb[2] - aabb[0]
 	h := aabb[3] - aabb[1]
 	if h > w {

@@ -7,7 +7,6 @@ import (
 	"sort"
 
 	"github.com/multippt/gopaddleocr/pkg/ocr/common"
-	"github.com/multippt/gopaddleocr/pkg/ocr/detect"
 	"github.com/multippt/gopaddleocr/pkg/ocr/utils"
 	ort "github.com/yalue/onnxruntime_go"
 )
@@ -81,7 +80,7 @@ func (m *Model) Close() error {
 }
 
 // Detect runs PP-DocLayoutV3 and returns layout boxes sorted by reading order.
-func (m *Model) Detect(img image.Image) ([]detect.Box, error) {
+func (m *Model) Detect(img image.Image) ([]utils.Box, error) {
 	bounds := img.Bounds()
 	origW := bounds.Max.X - bounds.Min.X
 	origH := bounds.Max.Y - bounds.Min.Y
@@ -191,7 +190,7 @@ func (m *Model) Detect(img image.Image) ([]detect.Box, error) {
 		return candidates[i].order < candidates[j].order
 	})
 
-	boxes := make([]detect.Box, len(candidates))
+	boxes := make([]utils.Box, len(candidates))
 	for i, c := range candidates {
 		// Axis-aligned box → [TL, TR, BR, BL] quad.
 		xMin := utils.ClampInt(int(c.xmin), 0, origW-1)
@@ -204,7 +203,7 @@ func (m *Model) Detect(img image.Image) ([]detect.Box, error) {
 			{xMax, yMax}, // BR
 			{xMin, yMax}, // BL
 		}
-		boxes[i] = detect.Box{
+		boxes[i] = utils.Box{
 			Quad:    quad,
 			Score:   c.score,
 			ClassID: c.classID,
