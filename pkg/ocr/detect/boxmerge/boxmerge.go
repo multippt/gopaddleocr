@@ -46,11 +46,6 @@ type Model struct {
 
 func NewModel(childDetector, parentDetector detect.Detector) *Model {
 	return &Model{
-		config: &Config{
-			MinOverlapRatio:  0.8,
-			MaxMergeDistance: 20,
-			MaxSizeRatio:     1.5,
-		},
 		childDetector:  childDetector,
 		parentDetector: parentDetector,
 	}
@@ -60,15 +55,18 @@ func (m *Model) GetName() string { return ModelName }
 
 func (m *Model) GetDefaultConfig() common.ModelConfig {
 	return &Config{
-		Strategy:         DocLayout,
+		Strategy:         Statistical,
 		MinOverlapRatio:  0.8,
-		MaxMergeDistance: 20,
+		MaxMergeDistance: 10,
 		MaxSizeRatio:     1.5,
 		BaseModelConfig:  common.BaseModelConfig{},
 	}
 }
 
-func (m *Model) Init(_ common.ModelConfig) error { return nil }
+func (m *Model) Init(config common.ModelConfig) error {
+	m.config = config.(*Config)
+	return nil
+}
 
 func (m *Model) Close() error {
 	var first error

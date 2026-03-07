@@ -59,7 +59,7 @@ func NewEngine() *Engine {
 	e := &Engine{
 		config: &Config{
 			RecognitionModel: "PaddleOCR",
-			EnableBoxMerge:   false,
+			EnableBoxMerge:   true,
 			Models:           make(map[string]common.ModelConfig),
 		},
 		models: make(map[string]common.Model),
@@ -70,7 +70,7 @@ func NewEngine() *Engine {
 	childDetModel := detectpaddleocr.NewModel()
 	e.RegisterModel(parentDetModel)
 	e.RegisterModel(childDetModel)
-	e.RegisterModel(boxmerge.NewModel(parentDetModel, childDetModel))
+	e.RegisterModel(boxmerge.NewModel(childDetModel, parentDetModel))
 	e.RegisterModel(classifypaddleocr.NewModel())
 	e.RegisterModel(recognizepaddleocr.NewModel())
 	e.RegisterModel(openairec.NewModel())
