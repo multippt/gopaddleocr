@@ -17,12 +17,7 @@ var testDetConfig = &ModelConfig{
 	BoxThresh:       0.6,
 	UnclipRatio:     2.0,
 	MinArea:         16,
-	BaseModelConfig: common.BaseModelConfig{
-		OnnxConfig: common.Config{
-			InputName:  "x",
-			OutputName: "fetch_name_0",
-		},
-	},
+	BaseModelConfig: common.BaseModelConfig{},
 }
 
 // ---------------------------------------------------------------------------

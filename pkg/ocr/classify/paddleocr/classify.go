@@ -46,9 +46,7 @@ func (m *Model) GetDefaultConfig() common.ModelConfig {
 		Std:       [3]float64{0.5, 0.5, 0.5},
 		BaseModelConfig: common.BaseModelConfig{
 			OnnxConfig: common.Config{
-				ModelPath:  filepath.Join("./models", "ch_ppocr_mobile_v2.0_cls_infer.onnx"),
-				InputName:  "x",
-				OutputName: "save_infer_model/scale_0.tmp_1",
+				ModelPath: filepath.Join("./models", "ch_ppocr_mobile_v2.0_cls_infer.onnx"),
 			},
 		},
 	}
@@ -60,9 +58,13 @@ func (m *Model) Init(config common.ModelConfig) error {
 		return fmt.Errorf("classify/paddleocr: expected *ModelConfig, got %T", config)
 	}
 	m.config = cfg
+	inputNames, outputNames, err := common.InputOutputNames(cfg.OnnxConfig.ModelPath, cfg.OnnxConfig.Options)
+	if err != nil {
+		return err
+	}
 	session, err := ort.NewDynamicAdvancedSession(cfg.OnnxConfig.ModelPath,
-		[]string{cfg.OnnxConfig.InputName},
-		[]string{cfg.OnnxConfig.OutputName},
+		inputNames,
+		outputNames,
 		cfg.OnnxConfig.Options)
 	if err != nil {
 		return err

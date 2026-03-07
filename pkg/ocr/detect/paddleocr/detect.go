@@ -51,9 +51,7 @@ func (m *Model) GetDefaultConfig() common.ModelConfig {
 		MinArea:         16,
 		BaseModelConfig: common.BaseModelConfig{
 			OnnxConfig: common.Config{
-				ModelPath:  filepath.Join("./models", "ch_PP-OCRv5_server_det.onnx"),
-				InputName:  "x",
-				OutputName: "fetch_name_0",
+				ModelPath: filepath.Join("./models", "ch_PP-OCRv5_server_det.onnx"),
 			},
 		},
 	}
@@ -65,9 +63,13 @@ func (m *Model) Init(config common.ModelConfig) error {
 		return fmt.Errorf("detect/paddleocr: expected *ModelConfig, got %T", config)
 	}
 	m.config = cfg
+	inputNames, outputNames, err := common.InputOutputNames(cfg.OnnxConfig.ModelPath, cfg.OnnxConfig.Options)
+	if err != nil {
+		return err
+	}
 	session, err := ort.NewDynamicAdvancedSession(cfg.OnnxConfig.ModelPath,
-		[]string{cfg.OnnxConfig.InputName},
-		[]string{cfg.OnnxConfig.OutputName},
+		inputNames,
+		outputNames,
 		cfg.OnnxConfig.Options)
 	if err != nil {
 		return err

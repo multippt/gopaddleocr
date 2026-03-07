@@ -56,10 +56,10 @@ func (m *Model) Init(config common.ModelConfig) error {
 		cfg.ScoreThreshold = 0.3
 	}
 
-	// PP-DocLayoutV3 takes 3 inputs and 3 outputs; only fetch_name_0 contains boxes.
-	inputNames := []string{"im_shape", "image", "scale_factor"}
-	outputNames := []string{"fetch_name_0", "fetch_name_1", "fetch_name_2"}
-
+	inputNames, outputNames, err := common.InputOutputNames(cfg.OnnxConfig.ModelPath, cfg.OnnxConfig.Options)
+	if err != nil {
+		return err
+	}
 	session, err := ort.NewDynamicAdvancedSession(cfg.OnnxConfig.ModelPath,
 		inputNames,
 		outputNames,

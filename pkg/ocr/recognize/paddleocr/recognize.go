@@ -48,9 +48,7 @@ func (m *Model) GetDefaultConfig() common.ModelConfig {
 		Std:      [3]float64{0.5, 0.5, 0.5},
 		BaseModelConfig: common.BaseModelConfig{
 			OnnxConfig: common.Config{
-				ModelPath:  filepath.Join("./models", "ch_PP-OCRv5_rec_server_infer.onnx"),
-				InputName:  "x",
-				OutputName: "fetch_name_0",
+				ModelPath: filepath.Join("./models", "ch_PP-OCRv5_rec_server_infer.onnx"),
 			},
 		},
 	}
@@ -67,9 +65,13 @@ func (m *Model) Init(config common.ModelConfig) error {
 	}
 	m.config = cfg
 	m.charDict = dict
+	inputNames, outputNames, err := common.InputOutputNames(cfg.OnnxConfig.ModelPath, cfg.OnnxConfig.Options)
+	if err != nil {
+		return err
+	}
 	session, err := ort.NewDynamicAdvancedSession(cfg.OnnxConfig.ModelPath,
-		[]string{cfg.OnnxConfig.InputName},
-		[]string{cfg.OnnxConfig.OutputName},
+		inputNames,
+		outputNames,
 		cfg.OnnxConfig.Options)
 	if err != nil {
 		return err
