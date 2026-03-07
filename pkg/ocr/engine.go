@@ -3,11 +3,29 @@ package ocr
 import (
 	"errors"
 	"image"
+	"os"
+	"runtime"
 	"sync"
 
 	"github.com/multippt/gopaddleocr/pkg/ocr/common"
 	"github.com/multippt/gopaddleocr/pkg/ocr/utils"
+	ort "github.com/yalue/onnxruntime_go"
 )
+
+// DefaultORTLibPath is the default path to the ONNX Runtime shared library (set by init from GOOS).
+var DefaultORTLibPath string = getDefaultORTLibPath()
+
+func getDefaultORTLibPath() string {
+	switch runtime.GOOS {
+	case "windows":
+		return "./onnxruntime/lib/onnxruntime.dll"
+	case "darwin":
+		return "./onnxruntime/lib/libonnxruntime.dylib"
+	default:
+		// linux and other unix-like
+		return "./onnxruntime/lib/libonnxruntime.so"
+	}
+}
 
 // Result is a single detected text region.
 // When Children is non-empty, this is a merged parent region containing child text lines.
@@ -58,15 +76,43 @@ func NewEngine(opts ...Option) *Engine {
 
 // Close releases all model resources.
 func (e *Engine) Close() error {
-	if e.workflow == nil {
-		return nil
+	var err error
+	if e.workflow != nil {
+		err = e.workflow.Close()
 	}
-	return e.workflow.Close()
+	if err != nil {
+		return err
+	}
+
+	if ort.IsInitialized() {
+		err = ort.DestroyEnvironment()
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func getEnv(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }
 
 // Init initializes the workflow and knownModels.
 func (e *Engine) Init() error {
 	var err error
+
+	ortPath := getEnv("ORT_LIB_PATH", DefaultORTLibPath)
+	ort.SetSharedLibraryPath(ortPath)
+	if !ort.IsInitialized() {
+		if err := ort.InitializeEnvironment(); err != nil {
+			return err
+		}
+	}
+
 	if e.workflow == nil {
 		e.workflow, err = e.getWorkflow()
 		if err != nil {
@@ -87,7 +133,7 @@ func (e *Engine) RegisterWorkflow(name string, factory WorkflowFactory) {
 func (e *Engine) getWorkflow() (*Workflow, error) {
 	factory, ok := e.knownWorkflows[e.config.WorkflowType]
 	if !ok {
-		return nil, errors.New("unknown recognition model")
+		return nil, errors.New("unknown workflow")
 	}
 	return factory(e.config, e), nil
 }
