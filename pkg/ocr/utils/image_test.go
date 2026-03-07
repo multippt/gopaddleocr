@@ -247,3 +247,229 @@ func TestOrderPoints4_Rotated(t *testing.T) {
 		t.Errorf("BL wrong: %v", got[3])
 	}
 }
+
+// ---------------------------------------------------------------------------
+// ColorRGBA
+// ---------------------------------------------------------------------------
+
+func TestColorRGBA(t *testing.T) {
+	// color.RGBA.RGBA() returns 16-bit values (8-bit shifted left by 8).
+	// ColorRGBA reverses that: uint8(v >> 8).
+	c := ColorRGBA(0xFF00, 0x8000, 0x0100, 0xFF00)
+	if c.R != 0xFF {
+		t.Errorf("R: got %d, want %d", c.R, 0xFF)
+	}
+	if c.G != 0x80 {
+		t.Errorf("G: got %d, want %d", c.G, 0x80)
+	}
+	if c.B != 0x01 {
+		t.Errorf("B: got %d, want %d", c.B, 0x01)
+	}
+	if c.A != 0xFF {
+		t.Errorf("A: got %d, want %d", c.A, 0xFF)
+	}
+	// Zero inputs → zero outputs.
+	z := ColorRGBA(0, 0, 0, 0)
+	if z != (color.RGBA{}) {
+		t.Errorf("zero: got %v, want zero", z)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// BilinearSample
+// ---------------------------------------------------------------------------
+
+func TestBilinearSample_Uniform(t *testing.T) {
+	// A solid-colour image: any sample point should return that colour.
+	img := image.NewRGBA(image.Rect(0, 0, 4, 4))
+	fill := color.RGBA{R: 100, G: 150, B: 200, A: 255}
+	for y := 0; y < 4; y++ {
+		for x := 0; x < 4; x++ {
+			img.SetRGBA(x, y, fill)
+		}
+	}
+	for _, pt := range [][2]float64{{0, 0}, {1.5, 1.5}, {3, 3}, {0.5, 2.7}} {
+		got := BilinearSample(img, pt[0], pt[1])
+		if got.R != fill.R || got.G != fill.G || got.B != fill.B {
+			t.Errorf("sample(%v): got %v, want %v", pt, got, fill)
+		}
+	}
+}
+
+func TestBilinearSample_Interpolation(t *testing.T) {
+	// 1×2 image (width=2, height=1): left pixel R=0, right pixel R=254.
+	// Sample at x=0.5 should give R≈127.
+	img := image.NewRGBA(image.Rect(0, 0, 2, 1))
+	img.SetRGBA(0, 0, color.RGBA{R: 0, A: 255})
+	img.SetRGBA(1, 0, color.RGBA{R: 254, A: 255})
+	got := BilinearSample(img, 0.5, 0)
+	// lerp: (0*0.5 + 65278*0.5) / 257 ≈ 127
+	if got.R < 125 || got.R > 129 {
+		t.Errorf("mid-interpolation R: got %d, want ~127", got.R)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// BilinearResize
+// ---------------------------------------------------------------------------
+
+func TestBilinearResize_Dims(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 100, 80))
+	out := BilinearResize(src, 50, 40)
+	b := out.Bounds()
+	if b.Dx() != 50 || b.Dy() != 40 {
+		t.Errorf("expected 50×40, got %d×%d", b.Dx(), b.Dy())
+	}
+}
+
+func TestBilinearResize_Uniform(t *testing.T) {
+	// Resizing a solid-colour image should preserve the colour.
+	src := image.NewRGBA(image.Rect(0, 0, 10, 10))
+	fill := color.RGBA{R: 80, G: 160, B: 240, A: 255}
+	for y := 0; y < 10; y++ {
+		for x := 0; x < 10; x++ {
+			src.SetRGBA(x, y, fill)
+		}
+	}
+	out := BilinearResize(src, 5, 5)
+	for y := 0; y < 5; y++ {
+		for x := 0; x < 5; x++ {
+			got := out.RGBAAt(x, y)
+			if got.R != fill.R || got.G != fill.G || got.B != fill.B {
+				t.Errorf("pixel(%d,%d): got %v, want %v", x, y, got, fill)
+			}
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ImageToNCHW / ImageToNCHWFromImage
+// ---------------------------------------------------------------------------
+
+func TestImageToNCHW(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	img.SetRGBA(0, 0, color.RGBA{R: 255, G: 0, B: 0, A: 255})
+	img.SetRGBA(1, 0, color.RGBA{R: 0, G: 255, B: 0, A: 255})
+	img.SetRGBA(0, 1, color.RGBA{R: 0, G: 0, B: 255, A: 255})
+	img.SetRGBA(1, 1, color.RGBA{R: 128, G: 128, B: 128, A: 255})
+
+	mean := [3]float64{0, 0, 0}
+	std := [3]float64{1, 1, 1}
+	data := ImageToNCHW(img, 2, 2, mean, std)
+
+	if len(data) != 3*2*2 {
+		t.Fatalf("len: got %d, want %d", len(data), 3*2*2)
+	}
+	// R channel pixel(0,0): (255/255 - 0) / 1 = 1.0
+	if math.Abs(float64(data[0])-1.0) > 0.01 {
+		t.Errorf("R[0,0]: got %f, want 1.0", data[0])
+	}
+	// G channel pixel(0,0): 0.0
+	if math.Abs(float64(data[4])) > 0.01 {
+		t.Errorf("G[0,0]: got %f, want 0.0", data[4])
+	}
+	// B channel pixel(0,0): 0.0
+	if math.Abs(float64(data[8])) > 0.01 {
+		t.Errorf("B[0,0]: got %f, want 0.0", data[8])
+	}
+}
+
+func TestImageToNCHWFromImage(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 3, 3))
+	data := ImageToNCHWFromImage(img, 3, 3, [3]float64{0, 0, 0}, [3]float64{1, 1, 1})
+	if len(data) != 3*3*3 {
+		t.Fatalf("len: got %d, want %d", len(data), 3*3*3)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// PointDistance
+// ---------------------------------------------------------------------------
+
+func TestPointDistance(t *testing.T) {
+	tests := []struct {
+		a, b [2]float64
+		want float64
+	}{
+		{[2]float64{0, 0}, [2]float64{3, 4}, 5},
+		{[2]float64{0, 0}, [2]float64{0, 0}, 0},
+		{[2]float64{1, 1}, [2]float64{1, 1}, 0},
+		{[2]float64{-3, 0}, [2]float64{0, 4}, 5},
+	}
+	for _, tc := range tests {
+		got := PointDistance(tc.a, tc.b)
+		if math.Abs(got-tc.want) > 1e-9 {
+			t.Errorf("PointDistance(%v, %v) = %f, want %f", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// PointInPolyF / PointInQuad4
+// ---------------------------------------------------------------------------
+
+func TestPointInPolyF(t *testing.T) {
+	// Axis-aligned square [0,10]×[0,10].
+	square := [][2]float64{{0, 0}, {10, 0}, {10, 10}, {0, 10}}
+
+	if !PointInPolyF(5, 5, square) {
+		t.Error("centre (5,5) should be inside square")
+	}
+	if PointInPolyF(15, 5, square) {
+		t.Error("(15,5) should be outside square")
+	}
+	if PointInPolyF(-1, 5, square) {
+		t.Error("(-1,5) should be outside square")
+	}
+
+	// Triangle: (0,0), (10,0), (5,10).
+	tri := [][2]float64{{0, 0}, {10, 0}, {5, 10}}
+	if !PointInPolyF(5, 5, tri) {
+		t.Error("(5,5) should be inside triangle")
+	}
+	if PointInPolyF(0, 9, tri) {
+		t.Error("(0,9) should be outside triangle")
+	}
+}
+
+func TestPointInQuad4(t *testing.T) {
+	q := [4][2]float64{{0, 0}, {10, 0}, {10, 10}, {0, 10}}
+	if !PointInQuad4(5, 5, q) {
+		t.Error("centre should be inside quad")
+	}
+	if PointInQuad4(20, 20, q) {
+		t.Error("(20,20) should be outside quad")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// FloatQuad
+// ---------------------------------------------------------------------------
+
+func TestFloatQuad(t *testing.T) {
+	q := [4][2]int{{1, 2}, {3, 4}, {5, 6}, {7, 8}}
+	got := FloatQuad(q)
+	for i := 0; i < 4; i++ {
+		if got[i][0] != float64(q[i][0]) || got[i][1] != float64(q[i][1]) {
+			t.Errorf("point %d: got %v, want %v", i, got[i], q[i])
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// PerspectiveWarp edge cases
+// ---------------------------------------------------------------------------
+
+func TestPerspectiveWarp_InvalidDims(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 100, 100))
+	quad := [4][2]float64{{10, 10}, {90, 10}, {90, 90}, {10, 90}}
+	if got := PerspectiveWarp(src, quad, 0, 50); got != nil {
+		t.Error("dstW=0 should return nil")
+	}
+	if got := PerspectiveWarp(src, quad, 50, 0); got != nil {
+		t.Error("dstH=0 should return nil")
+	}
+	if got := PerspectiveWarp(src, quad, -1, 50); got != nil {
+		t.Error("dstW<0 should return nil")
+	}
+}

@@ -320,27 +320,14 @@ func buildOCRLines(img image.Image, results []ocr.Result) ([]OCRLine, []string) 
 	lines := make([]OCRLine, len(results))
 	texts := make([]string, len(results))
 
-	type colorResult struct {
-		textColor  []int
-		wordColors []colordetect.WordColorEntry
-	}
-	colorResults := make([]colorResult, len(results))
+	colorResults := make([]colordetect.ColorResult, len(results))
 
 	var wg sync.WaitGroup
 	for i, r := range results {
 		wg.Add(1)
 		go func(idx int, res ocr.Result) {
 			defer wg.Done()
-			quad := [4][2]int{res.Box[0], res.Box[1], res.Box[2], res.Box[3]}
-			tc, fgMask, arr := colordetect.ComputeTextColor(img, quad)
-			var wc []colordetect.WordColorEntry
-			if fgMask != nil && arr != nil {
-				xs := [4]int{quad[0][0], quad[1][0], quad[2][0], quad[3][0]}
-				ys := [4]int{quad[0][1], quad[1][1], quad[2][1], quad[3][1]}
-				isVert := (utils.MaxInt4(ys) - utils.MinInt4(ys)) > (utils.MaxInt4(xs)-utils.MinInt4(xs))*2
-				wc = colordetect.ComputeWordColors(res.Text, quad, fgMask, arr, isVert)
-			}
-			colorResults[idx] = colorResult{textColor: tc, wordColors: wc}
+			colorResults[idx] = colordetect.ComputeTextColorResult(img, res.Box, res.Text)
 		}(i, r)
 	}
 	wg.Wait()
@@ -354,8 +341,8 @@ func buildOCRLines(img image.Image, results []ocr.Result) ([]OCRLine, []string) 
 			Box:        box,
 			Text:       r.Text,
 			Score:      r.Score,
-			TextColor:  colorResults[i].textColor,
-			WordColors: colorResults[i].wordColors,
+			TextColor:  colorResults[i].TextColor,
+			WordColors: colorResults[i].WordColors,
 		}
 		texts[i] = r.Text
 	}

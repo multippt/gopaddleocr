@@ -56,6 +56,58 @@ func makeLeafBox(x, y, w, h int, text string) Box {
 	}
 }
 
+func TestAABB_Compare(t *testing.T) {
+	tests := []struct {
+		name  string
+		a, b  AABB
+		want  bool
+	}{
+		// Different CenterY: a above b → true.
+		{"a above b", AABB{0, 0, 10, 10}, AABB{0, 20, 10, 30}, true},
+		// Different CenterY: b above a → false.
+		{"b above a", AABB{0, 20, 10, 30}, AABB{0, 0, 10, 10}, false},
+		// Same CenterY, a left of b → true.
+		{"same row, a left", AABB{0, 0, 10, 10}, AABB{20, 0, 30, 10}, true},
+		// Same CenterY, b left of a → false.
+		{"same row, b left", AABB{20, 0, 30, 10}, AABB{0, 0, 10, 10}, false},
+		// Same CenterY and CenterX → false (not strictly less).
+		{"equal", AABB{0, 0, 10, 10}, AABB{0, 0, 10, 10}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.a.Compare(tc.b); got != tc.want {
+				t.Errorf("Compare() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAABB_CompareCJK(t *testing.T) {
+	tests := []struct {
+		name  string
+		a, b  AABB
+		want  bool
+	}{
+		// Different CenterX: a right of b → true (right-to-left columns).
+		{"a right of b", AABB{20, 0, 30, 10}, AABB{0, 0, 10, 10}, true},
+		// Different CenterX: b right of a → false.
+		{"b right of a", AABB{0, 0, 10, 10}, AABB{20, 0, 30, 10}, false},
+		// Same CenterX, a above b → true (top-to-bottom within column).
+		{"same col, a above", AABB{0, 0, 10, 10}, AABB{0, 20, 10, 30}, true},
+		// Same CenterX, b above a → false.
+		{"same col, b above", AABB{0, 20, 10, 30}, AABB{0, 0, 10, 10}, false},
+		// Same CenterX and CenterY → false (not strictly less).
+		{"equal", AABB{0, 0, 10, 10}, AABB{0, 0, 10, 10}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.a.CompareCJK(tc.b); got != tc.want {
+				t.Errorf("CompareCJK() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestAABB_BoundedArea(t *testing.T) {
 	if got := (AABB{10, 20, 50, 80}).BoundedArea(); got != 2400 {
 		t.Errorf("BoundedArea() = %f, want 2400", got)

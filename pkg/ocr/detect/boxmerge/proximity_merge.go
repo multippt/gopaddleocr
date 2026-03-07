@@ -151,21 +151,9 @@ func (s *ProximityMergeStrategy) clusterBoxes(boxes []utils.Box) []utils.Box {
 			aabb1 := children[a].Quad.AABB()
 			aabb2 := children[b].Quad.AABB()
 			if infos[indices[0]].orient == 0 {
-				// Horizontal: sort by Y center, then X.
-				cy1 := (aabb1[1] + aabb1[3]) / 2
-				cy2 := (aabb2[1] + aabb2[3]) / 2
-				if cy1 != cy2 {
-					return cy1 < cy2
-				}
-				return (aabb1[0] + aabb1[2]) < (aabb2[0] + aabb2[2])
+				return aabb1.Compare(aabb2)
 			}
-			// Vertical (CJK): right-to-left columns, then top-to-bottom within column.
-			cx1 := (aabb1[0] + aabb1[2]) / 2
-			cx2 := (aabb2[0] + aabb2[2]) / 2
-			if cx1 != cx2 {
-				return cx1 > cx2
-			}
-			return (aabb1[1] + aabb1[3]) < (aabb2[1] + aabb2[3])
+			return aabb1.CompareCJK(aabb2)
 		})
 
 		parentQuad := [4][2]int{
@@ -185,14 +173,7 @@ func (s *ProximityMergeStrategy) clusterBoxes(boxes []utils.Box) []utils.Box {
 
 	// Sort parents by reading order (top-left first).
 	sort.Slice(result, func(i, j int) bool {
-		ai := result[i].Quad.AABB()
-		aj := result[j].Quad.AABB()
-		cy1 := (ai[1] + ai[3]) / 2
-		cy2 := (aj[1] + aj[3]) / 2
-		if cy1 != cy2 {
-			return cy1 < cy2
-		}
-		return (ai[0] + ai[2]) < (aj[0] + aj[2])
+		return result[i].Quad.AABB().Compare(result[j].Quad.AABB())
 	})
 
 	return result

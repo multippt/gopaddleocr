@@ -19,6 +19,24 @@ func (a AABB) Area() float64 { return float64(a.Width()) * float64(a.Height()) }
 func (a AABB) CenterX() int  { return (a[0] + a[2]) / 2 }
 func (a AABB) CenterY() int  { return (a[1] + a[3]) / 2 }
 
+// Compare reports whether a precedes other in normal reading order:
+// top-to-bottom, then left-to-right.
+func (a AABB) Compare(other AABB) bool {
+	if a.CenterY() != other.CenterY() {
+		return a.CenterY() < other.CenterY()
+	}
+	return a.CenterX() < other.CenterX()
+}
+
+// CompareCJK reports whether a precedes other in CJK vertical reading order:
+// right-to-left columns, then top-to-bottom within each column.
+func (a AABB) CompareCJK(other AABB) bool {
+	if a.CenterX() != other.CenterX() {
+		return a.CenterX() > other.CenterX()
+	}
+	return a.CenterY() < other.CenterY()
+}
+
 // BoundedArea returns 0 for degenerate (zero/negative) boxes, otherwise Area.
 func (a AABB) BoundedArea() float64 {
 	if a.Width() <= 0 || a.Height() <= 0 {

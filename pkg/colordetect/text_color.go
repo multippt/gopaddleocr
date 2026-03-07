@@ -157,7 +157,7 @@ type WordColorEntry struct {
 	Color []int `json:"color"`
 }
 
-func ComputeWordColors(text string, quad [4][2]int, fgMask [][]bool, arr *image.RGBA, isVert bool) []WordColorEntry {
+func ComputeWordColors(text string, fgMask [][]bool, arr *image.RGBA, isVert bool) []WordColorEntry {
 	if fgMask == nil || arr == nil || text == "" {
 		return nil
 	}
@@ -269,6 +269,19 @@ func ComputeWordColors(text string, quad [4][2]int, fgMask [][]bool, arr *image.
 		return nil
 	}
 	return wordColors
+}
+
+func ComputeTextColorResult(img image.Image, box [][2]int, text string) ColorResult {
+	quad := [4][2]int{box[0], box[1], box[2], box[3]}
+	tc, fgMask, arr := ComputeTextColor(img, quad)
+	var wc []WordColorEntry
+	if fgMask != nil && arr != nil {
+		xs := [4]int{quad[0][0], quad[1][0], quad[2][0], quad[3][0]}
+		ys := [4]int{quad[0][1], quad[1][1], quad[2][1], quad[3][1]}
+		isVert := (utils.MaxInt4(ys) - utils.MinInt4(ys)) > (utils.MaxInt4(xs)-utils.MinInt4(xs))*2
+		wc = ComputeWordColors(text, fgMask, arr, isVert)
+	}
+	return ColorResult{TextColor: tc, WordColors: wc}
 }
 
 // ---------------------------------------------------------------------------
@@ -518,4 +531,9 @@ func invertBool(b []bool) []bool {
 		out[i] = !v
 	}
 	return out
+}
+
+type ColorResult struct {
+	TextColor  []int
+	WordColors []WordColorEntry
 }
