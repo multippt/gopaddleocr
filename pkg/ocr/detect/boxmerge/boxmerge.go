@@ -8,7 +8,10 @@ import (
 	"sync"
 
 	"github.com/multippt/gopaddleocr/pkg/ocr/detect"
+	"github.com/multippt/gopaddleocr/pkg/ocr/onnx"
 )
+
+const ModelName = "box-merge"
 
 // Strategy controls how child boxes are grouped into parents.
 type Strategy int
@@ -20,16 +23,11 @@ const (
 	Statistical
 )
 
-// Config configures the BoxMerge detector.
+// Config configures the BoxMerge detector (strategy parameters only).
 type Config struct {
+	onnx.BaseModelConfig
+
 	Strategy Strategy
-
-	// ChildDetector produces fine-grained text-line boxes (e.g. PaddleOCR-det).
-	ChildDetector detect.Detector
-
-	// ParentDetector produces coarse layout boxes (e.g. PP-DocLayout).
-	// Required for DocLayout strategy; ignored for Statistical.
-	ParentDetector detect.Detector
 
 	// DocLayout settings
 	MinOverlapRatio float64 // Minimum fraction of child area covered by parent (default 0.8).
@@ -41,40 +39,37 @@ type Config struct {
 
 // Model implements detect.Detector by merging child boxes into parent groups.
 type Model struct {
-	config *Config
+	config         *Config
+	childDetector  detect.Detector
+	parentDetector detect.Detector
 }
 
-func NewModel(cfg *Config) (*Model, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("boxmerge: config is required")
-	}
-	if cfg.ChildDetector == nil {
+func NewModel(childDetector, parentDetector detect.Detector) (*Model, error) {
+	if childDetector == nil {
 		return nil, fmt.Errorf("boxmerge: ChildDetector is required")
 	}
-	if cfg.Strategy == DocLayout && cfg.ParentDetector == nil {
-		return nil, fmt.Errorf("boxmerge: ParentDetector is required for DocLayout strategy")
-	}
-	if cfg.MinOverlapRatio <= 0 {
-		cfg.MinOverlapRatio = 0.8
-	}
-	if cfg.MaxMergeDistance <= 0 {
-		cfg.MaxMergeDistance = 20
-	}
-	if cfg.MaxSizeRatio <= 0 {
-		cfg.MaxSizeRatio = 1.5
-	}
-	return &Model{config: cfg}, nil
+	return &Model{
+		config: &Config{
+			MinOverlapRatio:  0.8,
+			MaxMergeDistance: 20,
+			MaxSizeRatio:     1.5,
+		},
+		childDetector:  childDetector,
+		parentDetector: parentDetector,
+	}, nil
 }
+
+func (m *Model) Init(_ onnx.ModelConfig) error { return nil }
 
 func (m *Model) Close() error {
 	var first error
-	if m.config.ChildDetector != nil {
-		if err := m.config.ChildDetector.Close(); err != nil && first == nil {
+	if m.childDetector != nil {
+		if err := m.childDetector.Close(); err != nil && first == nil {
 			first = err
 		}
 	}
-	if m.config.ParentDetector != nil {
-		if err := m.config.ParentDetector.Close(); err != nil && first == nil {
+	if m.parentDetector != nil {
+		if err := m.parentDetector.Close(); err != nil && first == nil {
 			first = err
 		}
 	}
@@ -107,11 +102,11 @@ func (m *Model) detectDocLayout(img image.Image) ([]detect.Box, error) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		childBoxes, childErr = m.config.ChildDetector.Detect(img)
+		childBoxes, childErr = m.childDetector.Detect(img)
 	}()
 	go func() {
 		defer wg.Done()
-		parentBoxes, parentErr = m.config.ParentDetector.Detect(img)
+		parentBoxes, parentErr = m.parentDetector.Detect(img)
 	}()
 	wg.Wait()
 
@@ -134,7 +129,7 @@ func (m *Model) assignChildrenToParents(children, parents []detect.Box) []detect
 	parentChildren := make([][]detect.Box, len(parents))
 
 	for ci, child := range children {
-		childAABB := quadAABB(child.Quad)
+		childAABB := detect.BoxAABB(child.Quad)
 		childArea := aabbArea(childAABB)
 		if childArea <= 0 {
 			assigned[ci] = true // degenerate box, skip
@@ -149,7 +144,7 @@ func (m *Model) assignChildrenToParents(children, parents []detect.Box) []detect
 			if childOrient != parentOrient {
 				continue
 			}
-			parentAABB := quadAABB(parent.Quad)
+			parentAABB := detect.BoxAABB(parent.Quad)
 			overlap := aabbIntersectionArea(childAABB, parentAABB)
 			ratio := overlap / childArea
 			if ratio >= m.config.MinOverlapRatio && overlap > bestOverlap {
@@ -195,7 +190,7 @@ func (m *Model) assignChildrenToParents(children, parents []detect.Box) []detect
 // ---------------------------------------------------------------------------
 
 func (m *Model) detectStatistical(img image.Image) ([]detect.Box, error) {
-	children, err := m.config.ChildDetector.Detect(img)
+	children, err := m.childDetector.Detect(img)
 	if err != nil {
 		return nil, fmt.Errorf("boxmerge child detect: %w", err)
 	}
@@ -234,13 +229,13 @@ func (m *Model) clusterBoxes(boxes []detect.Box) []detect.Box {
 
 	// Precompute AABBs and text sizes.
 	type boxInfo struct {
-		aabb    [4]int // minX, minY, maxX, maxY
+		aabb     [4]int // minX, minY, maxX, maxY
 		textSize float64
-		orient  int // 0=horizontal, 1=vertical
+		orient   int // 0=horizontal, 1=vertical
 	}
 	infos := make([]boxInfo, n)
 	for i, b := range boxes {
-		aabb := quadAABB(b.Quad)
+		aabb := detect.BoxAABB(b.Quad)
 		w := float64(aabb[2] - aabb[0])
 		h := float64(aabb[3] - aabb[1])
 		// Text size is the smaller dimension (line height for horizontal, line width for vertical).
@@ -310,8 +305,8 @@ func (m *Model) clusterBoxes(boxes []detect.Box) []detect.Box {
 
 		// Sort children by reading order (top-to-bottom for horizontal, left-to-right for vertical).
 		sort.Slice(children, func(a, b int) bool {
-			aabb1 := quadAABB(children[a].Quad)
-			aabb2 := quadAABB(children[b].Quad)
+			aabb1 := detect.BoxAABB(children[a].Quad)
+			aabb2 := detect.BoxAABB(children[b].Quad)
 			if infos[indices[0]].orient == 0 {
 				// Horizontal: sort by Y center, then X.
 				cy1 := (aabb1[1] + aabb1[3]) / 2
@@ -347,8 +342,8 @@ func (m *Model) clusterBoxes(boxes []detect.Box) []detect.Box {
 
 	// Sort parents by reading order (top-left first).
 	sort.Slice(result, func(i, j int) bool {
-		ai := quadAABB(result[i].Quad)
-		aj := quadAABB(result[j].Quad)
+		ai := detect.BoxAABB(result[i].Quad)
+		aj := detect.BoxAABB(result[j].Quad)
 		cy1 := (ai[1] + ai[3]) / 2
 		cy2 := (aj[1] + aj[3]) / 2
 		if cy1 != cy2 {
@@ -363,27 +358,6 @@ func (m *Model) clusterBoxes(boxes []detect.Box) []detect.Box {
 // ---------------------------------------------------------------------------
 // Geometry helpers
 // ---------------------------------------------------------------------------
-
-// quadAABB returns [minX, minY, maxX, maxY] for a quad.
-func quadAABB(q [4][2]int) [4]int {
-	minX, minY := q[0][0], q[0][1]
-	maxX, maxY := q[0][0], q[0][1]
-	for _, p := range q[1:] {
-		if p[0] < minX {
-			minX = p[0]
-		}
-		if p[0] > maxX {
-			maxX = p[0]
-		}
-		if p[1] < minY {
-			minY = p[1]
-		}
-		if p[1] > maxY {
-			maxY = p[1]
-		}
-	}
-	return [4]int{minX, minY, maxX, maxY}
-}
 
 func aabbArea(a [4]int) float64 {
 	w := a[2] - a[0]
@@ -438,7 +412,7 @@ func aabbGap(a, b [4]int) float64 {
 
 // boxOrientation returns 0 for horizontal (width >= height) and 1 for vertical.
 func boxOrientation(q [4][2]int) int {
-	aabb := quadAABB(q)
+	aabb := detect.BoxAABB(q)
 	w := aabb[2] - aabb[0]
 	h := aabb[3] - aabb[1]
 	if h > w {

@@ -18,7 +18,7 @@ func getEnv(key, def string) string {
 
 type Server struct {
 	server    *gin.Engine
-	ocrEngine *ocr.PaddleOCREngine
+	ocrEngine *ocr.Engine
 }
 
 func NewServer() *Server {
@@ -44,7 +44,7 @@ func (s *Server) Start(listenAddr string) {
 	defer ort.DestroyEnvironment()
 
 	// Build and preload the OCR engine in the background.
-	ocrEngine := ocr.NewPaddleOCREngine()
+	ocrEngine := ocr.NewEngine(ocr.NewDefaultConfig())
 	go func() {
 		if err := ocrEngine.Load(); err != nil {
 			log.Printf("engine preload error: %v", err)

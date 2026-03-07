@@ -11,11 +11,12 @@ import (
 	ort "github.com/yalue/onnxruntime_go"
 )
 
+const ModelName = "pp-doclayoutv3"
+
 type ModelConfig struct {
-	ModelPath      string
 	InputSize      int     // default 800
 	ScoreThreshold float32 // default 0.3
-	OnnxConfig     onnx.Config
+	onnx.BaseModelConfig
 }
 
 // ---------------------------------------------------------------------------
@@ -27,9 +28,14 @@ type Model struct {
 	config  *ModelConfig
 }
 
-func NewModel(cfg *ModelConfig) (*Model, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("ppdoclayoutv3: config is required")
+func NewModel() *Model {
+	return &Model{}
+}
+
+func (m *Model) Init(config onnx.ModelConfig) error {
+	cfg, ok := config.(*ModelConfig)
+	if !ok {
+		return fmt.Errorf("ppdoclayoutv3: expected *ModelConfig, got %T", config)
 	}
 	if cfg.InputSize <= 0 {
 		cfg.InputSize = 800
@@ -45,14 +51,16 @@ func NewModel(cfg *ModelConfig) (*Model, error) {
 		outputName = "multiclass_nms3_0.tmp_0"
 	}
 
-	session, err := ort.NewDynamicAdvancedSession(cfg.ModelPath,
+	session, err := ort.NewDynamicAdvancedSession(cfg.OnnxConfig.ModelPath,
 		inputNames,
 		[]string{outputName},
 		cfg.OnnxConfig.Options)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return &Model{session: session, config: cfg}, nil
+	m.config = cfg
+	m.session = session
+	return nil
 }
 
 func (m *Model) Close() error {

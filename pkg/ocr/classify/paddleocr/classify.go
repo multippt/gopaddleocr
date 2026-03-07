@@ -9,16 +9,16 @@ import (
 	ort "github.com/yalue/onnxruntime_go"
 )
 
-type ModelConfig struct {
-	ModelPath string
+const ModelName = "paddleocr-cls"
 
+type ModelConfig struct {
 	Height    int
 	Width     int
 	Threshold float32
 	Mean      [3]float64
 	Std       [3]float64
 
-	OnnxConfig onnx.Config
+	onnx.BaseModelConfig
 }
 
 // ---------------------------------------------------------------------------
@@ -30,20 +30,25 @@ type Model struct {
 	config  *ModelConfig
 }
 
-func NewModel(cfg *ModelConfig) (*Model, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("classify: config is required")
+func NewModel() *Model {
+	return &Model{}
+}
+
+func (m *Model) Init(config onnx.ModelConfig) error {
+	cfg, ok := config.(*ModelConfig)
+	if !ok {
+		return fmt.Errorf("classify/paddleocr: expected *ModelConfig, got %T", config)
 	}
-	m := &Model{config: cfg}
-	session, err := ort.NewDynamicAdvancedSession(cfg.ModelPath,
+	m.config = cfg
+	session, err := ort.NewDynamicAdvancedSession(cfg.OnnxConfig.ModelPath,
 		[]string{cfg.OnnxConfig.InputName},
 		[]string{cfg.OnnxConfig.OutputName},
 		cfg.OnnxConfig.Options)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	m.session = session
-	return m, nil
+	return nil
 }
 
 func (m *Model) Close() error {

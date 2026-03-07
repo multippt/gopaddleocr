@@ -11,15 +11,16 @@ import (
 	ort "github.com/yalue/onnxruntime_go"
 )
 
+const ModelName = "paddleocr-rec"
+
 type ModelConfig struct {
-	ModelPath string
-	DictPath  string
+	DictPath string
 
 	Height int
 	Mean   [3]float64
 	Std    [3]float64
 
-	OnnxConfig onnx.Config
+	onnx.BaseModelConfig
 }
 
 // ---------------------------------------------------------------------------
@@ -32,24 +33,30 @@ type Model struct {
 	config   *ModelConfig
 }
 
-func NewModel(cfg *ModelConfig) (*Model, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("recognize: config is required")
+func NewModel() *Model {
+	return &Model{}
+}
+
+func (m *Model) Init(config onnx.ModelConfig) error {
+	cfg, ok := config.(*ModelConfig)
+	if !ok {
+		return fmt.Errorf("recognize/paddleocr: expected *ModelConfig, got %T", config)
 	}
-	dict, err := NewCharsetDict(cfg.ModelPath, cfg.DictPath)
+	dict, err := NewCharsetDict(cfg.OnnxConfig.ModelPath, cfg.DictPath)
 	if err != nil {
-		return nil, fmt.Errorf("char dict: %w", err)
+		return fmt.Errorf("char dict: %w", err)
 	}
-	m := &Model{config: cfg, charDict: dict}
-	session, err := ort.NewDynamicAdvancedSession(cfg.ModelPath,
+	m.config = cfg
+	m.charDict = dict
+	session, err := ort.NewDynamicAdvancedSession(cfg.OnnxConfig.ModelPath,
 		[]string{cfg.OnnxConfig.InputName},
 		[]string{cfg.OnnxConfig.OutputName},
 		cfg.OnnxConfig.Options)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	m.session = session
-	return m, nil
+	return nil
 }
 
 func (m *Model) Close() error {

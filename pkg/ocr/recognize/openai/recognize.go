@@ -10,9 +10,12 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/multippt/gopaddleocr/pkg/ocr/onnx"
 	"github.com/multippt/gopaddleocr/pkg/ocr/recognize"
 	"github.com/multippt/gopaddleocr/pkg/ocr/utils"
 )
+
+const ModelName = "openai-rec"
 
 type ModelConfig struct {
 	Endpoint     string // e.g. "https://open.bigmodel.cn/api/paas/v4"
@@ -20,6 +23,7 @@ type ModelConfig struct {
 	Model        string // e.g. "glm-4v-plus"
 	SystemPrompt string // default: "You are an OCR assistant. Output only the exact text you see, with no explanation."
 	UserPrompt   string // default: "Please transcribe all text in this image exactly as it appears."
+	onnx.BaseModelConfig
 }
 
 // ---------------------------------------------------------------------------
@@ -31,12 +35,20 @@ type Model struct {
 	client *http.Client
 }
 
-func NewModel(cfg ModelConfig) (*Model, error) {
+func NewModel() *Model {
+	return &Model{client: &http.Client{}}
+}
+
+func (m *Model) Init(config onnx.ModelConfig) error {
+	cfg, ok := config.(*ModelConfig)
+	if !ok {
+		return fmt.Errorf("openai recognizer: expected *ModelConfig, got %T", config)
+	}
 	if cfg.Endpoint == "" {
-		return nil, fmt.Errorf("openai recognizer: Endpoint is required")
+		return fmt.Errorf("openai recognizer: Endpoint is required")
 	}
 	if cfg.Model == "" {
-		return nil, fmt.Errorf("openai recognizer: Model is required")
+		return fmt.Errorf("openai recognizer: Model is required")
 	}
 	if cfg.SystemPrompt == "" {
 		cfg.SystemPrompt = "You are an OCR assistant. Output only the exact text you see, with no explanation."
@@ -44,7 +56,8 @@ func NewModel(cfg ModelConfig) (*Model, error) {
 	if cfg.UserPrompt == "" {
 		cfg.UserPrompt = "Please transcribe all text in this image exactly as it appears."
 	}
-	return &Model{config: cfg, client: &http.Client{}}, nil
+	m.config = *cfg
+	return nil
 }
 
 func (m *Model) Close() error { return nil }

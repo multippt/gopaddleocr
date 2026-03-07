@@ -10,9 +10,12 @@ import (
 	"github.com/multippt/gopaddleocr/pkg/ocr/classify"
 	classifypaddleocr "github.com/multippt/gopaddleocr/pkg/ocr/classify/paddleocr"
 	"github.com/multippt/gopaddleocr/pkg/ocr/detect"
+	"github.com/multippt/gopaddleocr/pkg/ocr/detect/boxmerge"
 	detectpaddleocr "github.com/multippt/gopaddleocr/pkg/ocr/detect/paddleocr"
+	ppdoclayoutv3 "github.com/multippt/gopaddleocr/pkg/ocr/detect/pp-doclayoutv3"
 	"github.com/multippt/gopaddleocr/pkg/ocr/onnx"
 	"github.com/multippt/gopaddleocr/pkg/ocr/recognize"
+	openairec "github.com/multippt/gopaddleocr/pkg/ocr/recognize/openai"
 	recognizepaddleocr "github.com/multippt/gopaddleocr/pkg/ocr/recognize/paddleocr"
 )
 
@@ -25,262 +28,194 @@ type Result struct {
 	Children []Result `json:"children,omitempty"`
 }
 
+// Config holds all configuration for the Engine.
 type Config struct {
-	DetectModelConfig    *detectpaddleocr.ModelConfig
-	ClassifyModelConfig  *classifypaddleocr.ModelConfig
-	RecognizeModelConfig *recognizepaddleocr.ModelConfig
-
-	// Optional overrides — if set, bypass model-path construction.
-	Detector   detect.Detector
-	Classifier classify.Classifier
-	Recognizer recognize.Recognizer
-
-	// RecognizeParent controls behavior when detection returns hierarchical boxes.
-	// When false (default, PaddleOCR workflow): cls+rec operate on child boxes,
-	// text is aggregated per parent.
-	// When true (GLM-OCR workflow): rec operates on parent boxes only, children ignored.
-	RecognizeParent bool
+	Models           map[string]onnx.ModelConfig
+	EnableBoxMerge   bool
+	RecognitionModel string // "PaddleOCR" (default) or "GLM-OCR"
 }
 
+// Workflow holds the three-stage pipeline components.
+type Workflow struct {
+	detector   detect.Detector
+	classifier classify.Classifier
+	recognizer recognize.Recognizer
+}
+
+// Engine coordinates the detect → classify → recognize pipeline.
+type Engine struct {
+	once     sync.Once
+	loadErr  error
+	workflow *Workflow
+	config   *Config
+}
+
+// NewEngine creates an Engine with the given config.
+func NewEngine(cfg *Config) *Engine {
+	return &Engine{config: cfg}
+}
+
+// NewDefaultConfig returns a Config populated with PaddleOCR defaults.
 func NewDefaultConfig() *Config {
 	return &Config{
-		DetectModelConfig: &detectpaddleocr.ModelConfig{
-			ModelPath:       filepath.Join("./models", "ch_PP-OCRv5_server_det.onnx"),
-			LimitSideLength: 1280,
-			Mean:            [3]float32{0.485, 0.456, 0.406},
-			Std:             [3]float32{0.229, 0.224, 0.225},
-			Thresh:          0.3,
-			BoxThresh:       0.6,
-			UnclipRatio:     2.0,
-			MinArea:         16,
-			OnnxConfig: onnx.Config{
-				InputName:  "x",
-				OutputName: "fetch_name_0",
+		RecognitionModel: "PaddleOCR",
+		Models: map[string]onnx.ModelConfig{
+			detectpaddleocr.ModelName: &detectpaddleocr.ModelConfig{
+				LimitSideLength: 1280,
+				Mean:            [3]float32{0.485, 0.456, 0.406},
+				Std:             [3]float32{0.229, 0.224, 0.225},
+				Thresh:          0.3,
+				BoxThresh:       0.6,
+				UnclipRatio:     2.0,
+				MinArea:         16,
+				BaseModelConfig: onnx.BaseModelConfig{
+					OnnxConfig: onnx.Config{
+						ModelPath:  filepath.Join("./models", "ch_PP-OCRv5_server_det.onnx"),
+						InputName:  "x",
+						OutputName: "fetch_name_0",
+					},
+				},
+			},
+			ppdoclayoutv3.ModelName: &ppdoclayoutv3.ModelConfig{
+				BaseModelConfig: onnx.BaseModelConfig{
+					OnnxConfig: onnx.Config{
+						ModelPath: filepath.Join("./models", "PP-DocLayout-L.onnx"),
+					},
+				},
+			},
+			classifypaddleocr.ModelName: &classifypaddleocr.ModelConfig{
+				Height:    48,
+				Width:     192,
+				Threshold: 0.9,
+				Mean:      [3]float64{0.5, 0.5, 0.5},
+				Std:       [3]float64{0.5, 0.5, 0.5},
+				BaseModelConfig: onnx.BaseModelConfig{
+					OnnxConfig: onnx.Config{
+						ModelPath:  filepath.Join("./models", "ch_ppocr_mobile_v2.0_cls_infer.onnx"),
+						InputName:  "x",
+						OutputName: "save_infer_model/scale_0.tmp_1",
+					},
+				},
+			},
+			recognizepaddleocr.ModelName: &recognizepaddleocr.ModelConfig{
+				DictPath: filepath.Join("./models", "ppocr_keys_v5.txt"),
+				Height:   48,
+				Mean:     [3]float64{0.5, 0.5, 0.5},
+				Std:      [3]float64{0.5, 0.5, 0.5},
+				BaseModelConfig: onnx.BaseModelConfig{
+					OnnxConfig: onnx.Config{
+						ModelPath:  filepath.Join("./models", "ch_PP-OCRv5_rec_server_infer.onnx"),
+						InputName:  "x",
+						OutputName: "fetch_name_0",
+					},
+				},
 			},
 		},
-		ClassifyModelConfig: &classifypaddleocr.ModelConfig{
-			ModelPath: filepath.Join("./models", "ch_ppocr_mobile_v2.0_cls_infer.onnx"),
-			Height:    48,
-			Width:     192,
-			Threshold: 0.9,
-			Mean:      [3]float64{0.5, 0.5, 0.5},
-			Std:       [3]float64{0.5, 0.5, 0.5},
-			OnnxConfig: onnx.Config{
-				InputName:  "x",
-				OutputName: "save_infer_model/scale_0.tmp_1",
-			},
-		},
-		RecognizeModelConfig: &recognizepaddleocr.ModelConfig{
-			ModelPath: filepath.Join("./models", "ch_PP-OCRv5_rec_server_infer.onnx"),
-			DictPath:  filepath.Join("./models", "ppocr_keys_v5.txt"),
-			Height:    48,
-			Mean:      [3]float64{0.5, 0.5, 0.5},
-			Std:       [3]float64{0.5, 0.5, 0.5},
-			OnnxConfig: onnx.Config{
-				InputName:  "x",
-				OutputName: "fetch_name_0",
-			},
-		},
 	}
 }
 
-var DefaultConfig = NewDefaultConfig()
-
-// Option mutates the engine Config (used by NewPaddleOCREngine).
-type Option func(*Config)
-
-// WithConfig sets the entire config. Use for full custom config or tests.
-func WithConfig(cfg *Config) Option {
-	return func(c *Config) {
-		if cfg != nil {
-			*c = *cfg
-			if cfg.DetectModelConfig != nil {
-				detCfg := *cfg.DetectModelConfig
-				c.DetectModelConfig = &detCfg
-			}
-			if cfg.ClassifyModelConfig != nil {
-				clsCfg := *cfg.ClassifyModelConfig
-				c.ClassifyModelConfig = &clsCfg
-			}
-			if cfg.RecognizeModelConfig != nil {
-				recCfg := *cfg.RecognizeModelConfig
-				c.RecognizeModelConfig = &recCfg
-			}
-		}
-	}
-}
-
-// WithDetectModelPath sets the detection model path.
-func WithDetectModelPath(path string) Option {
-	return func(c *Config) {
-		if c.DetectModelConfig != nil {
-			c.DetectModelConfig.ModelPath = path
-		}
-	}
-}
-
-// WithClassifyModelPath sets the classification model path.
-func WithClassifyModelPath(path string) Option {
-	return func(c *Config) {
-		if c.ClassifyModelConfig != nil {
-			c.ClassifyModelConfig.ModelPath = path
-		}
-	}
-}
-
-// WithRecognizeModelPath sets the recognition model path.
-func WithRecognizeModelPath(path string) Option {
-	return func(c *Config) {
-		if c.RecognizeModelConfig != nil {
-			c.RecognizeModelConfig.ModelPath = path
-		}
-	}
-}
-
-// WithRecognizeDictPath sets the recognition dictionary path.
-func WithRecognizeDictPath(path string) Option {
-	return func(c *Config) {
-		if c.RecognizeModelConfig != nil {
-			c.RecognizeModelConfig.DictPath = path
-		}
-	}
-}
-
-// WithDetector overrides the detector; bypasses DetectModelConfig construction.
-func WithDetector(d detect.Detector) Option {
-	return func(c *Config) {
-		c.Detector = d
-	}
-}
-
-// WithClassifier overrides the classifier; bypasses ClassifyModelConfig construction.
-func WithClassifier(cls classify.Classifier) Option {
-	return func(c *Config) {
-		c.Classifier = cls
-	}
-}
-
-// WithRecognizer overrides the recognizer; bypasses RecognizeModelConfig construction.
-func WithRecognizer(r recognize.Recognizer) Option {
-	return func(c *Config) {
-		c.Recognizer = r
-	}
-}
-
-// WithRecognizeParent sets whether recognition operates on parent boxes (true)
-// or child boxes (false). Use true for GLM-OCR workflows, false for PaddleOCR.
-func WithRecognizeParent(v bool) Option {
-	return func(c *Config) {
-		c.RecognizeParent = v
-	}
-}
-
-// defaultConfigCopy returns a deep copy of DefaultConfig so callers can mutate it via options.
-func defaultConfigCopy() *Config {
-	cfg := &Config{}
-	if DefaultConfig.DetectModelConfig != nil {
-		det := *DefaultConfig.DetectModelConfig
-		cfg.DetectModelConfig = &det
-	}
-	if DefaultConfig.ClassifyModelConfig != nil {
-		cls := *DefaultConfig.ClassifyModelConfig
-		cfg.ClassifyModelConfig = &cls
-	}
-	if DefaultConfig.RecognizeModelConfig != nil {
-		rec := *DefaultConfig.RecognizeModelConfig
-		cfg.RecognizeModelConfig = &rec
-	}
-	return cfg
-}
-
-// PaddleOCREngine coordinates the detect → classify → recognize pipeline.
-type PaddleOCREngine struct {
-	once    sync.Once
-	loadErr error
-
-	det detect.Detector
-	cls classify.Classifier
-	rec recognize.Recognizer
-
-	config *Config
-}
-
-func NewPaddleOCREngine(opts ...Option) *PaddleOCREngine {
-	cfg := defaultConfigCopy()
-	for _, opt := range opts {
-		opt(cfg)
-	}
-	return &PaddleOCREngine{
-		config: cfg,
-	}
-}
-
-// Load loads all three ONNX models exactly once.
-// It is safe to call from multiple goroutines; only the first call does work.
-func (e *PaddleOCREngine) Load() error {
+// Load initializes the workflow exactly once.
+func (e *Engine) Load() error {
 	e.once.Do(func() {
-		e.loadErr = e.doLoad()
+		e.loadErr = e.buildWorkflow()
 	})
 	return e.loadErr
 }
 
-func (e *PaddleOCREngine) doLoad() error {
-	var err error
+func (e *Engine) buildWorkflow() error {
+	var (
+		det detect.Detector
+		cls classify.Classifier
+		rec recognize.Recognizer
+		err error
+	)
 
-	if e.config.Detector != nil {
-		e.det = e.config.Detector
-	} else {
-		if e.config.DetectModelConfig == nil {
-			return fmt.Errorf("load det model: DetectModelConfig is nil")
+	switch e.config.RecognitionModel {
+	case "GLM-OCR":
+		if e.config.EnableBoxMerge {
+			childDet := detectpaddleocr.NewModel()
+			if err = childDet.Init(e.config.Models[detectpaddleocr.ModelName]); err != nil {
+				return fmt.Errorf("load child detector: %w", err)
+			}
+			parentDet := ppdoclayoutv3.NewModel()
+			if err = parentDet.Init(e.config.Models[ppdoclayoutv3.ModelName]); err != nil {
+				return fmt.Errorf("load parent detector: %w", err)
+			}
+			merged, mergeErr := boxmerge.NewModel(childDet, parentDet)
+			if mergeErr != nil {
+				return fmt.Errorf("boxmerge: %w", mergeErr)
+			}
+			det = merged
+		} else {
+			parentDet := ppdoclayoutv3.NewModel()
+			if err = parentDet.Init(e.config.Models[ppdoclayoutv3.ModelName]); err != nil {
+				return fmt.Errorf("load detector: %w", err)
+			}
+			det = parentDet
 		}
-		e.det, err = detectpaddleocr.NewModel(e.config.DetectModelConfig)
-		if err != nil {
-			return fmt.Errorf("load det model: %w", err)
+		cls = classify.StubClassifier{}
+		openaiModel := openairec.NewModel()
+		if err = openaiModel.Init(e.config.Models[openairec.ModelName]); err != nil {
+			return fmt.Errorf("load recognizer: %w", err)
 		}
+		rec = openaiModel
+
+	default: // "PaddleOCR"
+		if e.config.EnableBoxMerge {
+			childDet := detectpaddleocr.NewModel()
+			if err = childDet.Init(e.config.Models[detectpaddleocr.ModelName]); err != nil {
+				return fmt.Errorf("load child detector: %w", err)
+			}
+			parentDet := ppdoclayoutv3.NewModel()
+			if err = parentDet.Init(e.config.Models[ppdoclayoutv3.ModelName]); err != nil {
+				return fmt.Errorf("load parent detector: %w", err)
+			}
+			merged, mergeErr := boxmerge.NewModel(childDet, parentDet)
+			if mergeErr != nil {
+				return fmt.Errorf("boxmerge: %w", mergeErr)
+			}
+			det = merged
+		} else {
+			plainDet := detectpaddleocr.NewModel()
+			if err = plainDet.Init(e.config.Models[detectpaddleocr.ModelName]); err != nil {
+				return fmt.Errorf("load detector: %w", err)
+			}
+			det = plainDet
+		}
+		plainCls := classifypaddleocr.NewModel()
+		if err = plainCls.Init(e.config.Models[classifypaddleocr.ModelName]); err != nil {
+			return fmt.Errorf("load classifier: %w", err)
+		}
+		cls = plainCls
+		plainRec := recognizepaddleocr.NewModel()
+		if err = plainRec.Init(e.config.Models[recognizepaddleocr.ModelName]); err != nil {
+			return fmt.Errorf("load recognizer: %w", err)
+		}
+		rec = plainRec
 	}
 
-	if e.config.Classifier != nil {
-		e.cls = e.config.Classifier
-	} else {
-		if e.config.ClassifyModelConfig == nil {
-			return fmt.Errorf("load cls model: ClassifyModelConfig is nil")
-		}
-		e.cls, err = classifypaddleocr.NewModel(e.config.ClassifyModelConfig)
-		if err != nil {
-			return fmt.Errorf("load cls model: %w", err)
-		}
-	}
-
-	if e.config.Recognizer != nil {
-		e.rec = e.config.Recognizer
-	} else {
-		if e.config.RecognizeModelConfig == nil {
-			return fmt.Errorf("load rec model: RecognizeModelConfig is nil")
-		}
-		e.rec, err = recognizepaddleocr.NewModel(e.config.RecognizeModelConfig)
-		if err != nil {
-			return fmt.Errorf("load rec model: %w", err)
-		}
-	}
-
+	e.workflow = &Workflow{detector: det, classifier: cls, recognizer: rec}
 	return nil
 }
 
 // Close releases all model resources.
-func (e *PaddleOCREngine) Close() error {
+func (e *Engine) Close() error {
+	if e.workflow == nil {
+		return nil
+	}
 	var errs []error
-	if e.det != nil {
-		if err := e.det.Close(); err != nil {
+	if e.workflow.detector != nil {
+		if err := e.workflow.detector.Close(); err != nil {
 			errs = append(errs, err)
 		}
 	}
-	if e.cls != nil {
-		if err := e.cls.Close(); err != nil {
+	if e.workflow.classifier != nil {
+		if err := e.workflow.classifier.Close(); err != nil {
 			errs = append(errs, err)
 		}
 	}
-	if e.rec != nil {
-		if err := e.rec.Close(); err != nil {
+	if e.workflow.recognizer != nil {
+		if err := e.workflow.recognizer.Close(); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -291,12 +226,12 @@ func (e *PaddleOCREngine) Close() error {
 }
 
 // RunOCR runs the full detect → classify → recognize pipeline on img.
-func (e *PaddleOCREngine) RunOCR(img image.Image) ([]Result, error) {
+func (e *Engine) RunOCR(img image.Image) ([]Result, error) {
 	if err := e.Load(); err != nil {
 		return nil, err
 	}
 
-	boxes, err := e.det.Detect(img)
+	boxes, err := e.workflow.detector.Detect(img)
 	if err != nil {
 		return nil, fmt.Errorf("detection: %w", err)
 	}
@@ -323,10 +258,10 @@ func (e *PaddleOCREngine) RunOCR(img image.Image) ([]Result, error) {
 }
 
 // recognizeFlat runs cls+rec on a single box (no children).
-func (e *PaddleOCREngine) recognizeFlat(img image.Image, box detect.Box) *Result {
+func (e *Engine) recognizeFlat(img image.Image, box detect.Box) *Result {
 	quad := box.Quad
 
-	flip, err := e.cls.Classify(img, quad)
+	flip, err := e.workflow.classifier.Classify(img, quad)
 	if err != nil {
 		flip = false
 	}
@@ -334,25 +269,25 @@ func (e *PaddleOCREngine) recognizeFlat(img image.Image, box detect.Box) *Result
 		quad = [4][2]int{quad[2], quad[3], quad[0], quad[1]}
 	}
 
-	res, err := e.rec.Recognize(img, quad)
+	res, err := e.workflow.recognizer.Recognize(img, quad)
 	if err != nil || res.Text == "" {
 		return nil
 	}
 
+	box.Text = res.Text
 	outBox := [][2]int{quad[0], quad[1], quad[2], quad[3]}
 	return &Result{Box: outBox, Text: res.Text, Score: res.Score}
 }
 
 // recognizeHierarchical handles a parent box with children.
-// RecognizeParent=false (PaddleOCR): cls+rec on children, aggregate per parent.
-// RecognizeParent=true (GLM-OCR): rec on parent box only.
-func (e *PaddleOCREngine) recognizeHierarchical(img image.Image, parent detect.Box) *Result {
+// RecognitionModel=="GLM-OCR": rec on parent box only.
+// Default (PaddleOCR): cls+rec on children, aggregate per parent.
+func (e *Engine) recognizeHierarchical(img image.Image, parent detect.Box) *Result {
 	parentQuad := parent.Quad
 	outBox := [][2]int{parentQuad[0], parentQuad[1], parentQuad[2], parentQuad[3]}
 
-	if e.config.RecognizeParent {
-		// GLM-OCR: recognize parent box directly, ignore children.
-		res, err := e.rec.Recognize(img, parentQuad)
+	if e.config.RecognitionModel == "GLM-OCR" {
+		res, err := e.workflow.recognizer.Recognize(img, parentQuad)
 		if err != nil || res.Text == "" {
 			return nil
 		}
@@ -386,9 +321,9 @@ func (e *PaddleOCREngine) recognizeHierarchical(img image.Image, parent detect.B
 }
 
 // DetectOnly runs only the detection model and returns boxes.
-func (e *PaddleOCREngine) DetectOnly(img image.Image) ([]detect.Box, error) {
+func (e *Engine) DetectOnly(img image.Image) ([]detect.Box, error) {
 	if err := e.Load(); err != nil {
 		return nil, err
 	}
-	return e.det.Detect(img)
+	return e.workflow.detector.Detect(img)
 }
