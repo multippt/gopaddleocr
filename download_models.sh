@@ -14,7 +14,7 @@ declare -A MODELS=(
 cd models
 for file in "${!MODELS[@]}"; do
   if [ ! -f "$file" ]; then
-    curl -o "$file" "${MODELS[$file]}"
+    curl -Lo "$file" "${MODELS[$file]}"
   fi
 done
 )

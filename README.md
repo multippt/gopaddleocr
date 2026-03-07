@@ -34,7 +34,6 @@ The default PaddleOCR workflow expects the following files under `./models/` (re
 | `ch_PP-OCRv5_server_det.onnx` | Detection model |
 | `ch_ppocr_mobile_v2.0_cls_infer.onnx` | Direction classifier |
 | `ch_PP-OCRv5_rec_server_infer.onnx` | Recognition model |
-| `ppocr_keys_v5.txt` | Recognition character dictionary (optional; can be generated from the rec model metadata) |
 
 **Using the download scripts:**
 
@@ -48,44 +47,53 @@ The default PaddleOCR workflow expects the following files under `./models/` (re
 Import the OCR package and create an engine with optional configuration:
 
 ```go
+package main
+
 import (
-    "image"
-    _ "image/png"
-    "os"
+	"fmt"
+	"image"
+	_ "image/png"
+	"os"
 
-    "github.com/multippt/gopaddleocr/pkg/ocr"
-    "github.com/multippt/gopaddleocr/pkg/ocr/common"
+	"github.com/multippt/gopaddleocr/pkg/ocr"
 )
 
-// Load an image from file.
-f, err := os.Open("path/to/image.png")
-if err != nil {
-    // handle error
+func main() {
+	// Load an image from file.
+	f, err := os.Open("image.png")
+	if err != nil {
+		fmt.Printf("%v\n", err)
+		return
+	}
+	defer f.Close()
+	img, _, err := image.Decode(f)
+	if err != nil {
+		fmt.Printf("%v\n", err)
+		return
+	}
+
+	// Create engine (optional: ocr.WithModelConfig, ocr.WithWorkflowType, ocr.WithBoxMerge)
+	engine := ocr.NewEngine(
+		ocr.WithWorkflowType("PaddleOCR"), // or "GLM-OCR"
+		ocr.WithBoxMerge(true),
+	)
+	defer engine.Close()
+
+	// Set ORT_LIB_PATH if needed (default: ./onnxruntime/lib/onnxruntime.dll)
+	if err := engine.Init(); err != nil {
+		fmt.Printf("%v\n", err)
+		return
+	}
+
+	// Run full OCR on an image
+	results, _ := engine.RunOCR(img)
+	// results: []ocr.Result with Box, Text, Score (and optional Children)
+	fmt.Printf("%v\n", results)
+
+	// Or run detection only (text boxes, no recognition)
+	boxes, _ := engine.DetectOnly(img)
+	fmt.Printf("%v\n", boxes)
 }
-defer f.Close()
-img, _, err := image.Decode(f)
-if err != nil {
-    // handle error
-}
-
-// Create engine (optional: ocr.WithModelConfig, ocr.WithWorkflowType, ocr.WithBoxMerge)
-engine := ocr.NewEngine(
-    ocr.WithWorkflowType("PaddleOCR"), // or "GLM-OCR"
-    ocr.WithBoxMerge(true),
-)
-defer engine.Close()
-
-// Set ORT_LIB_PATH if needed (default: ./onnxruntime/lib/onnxruntime.dll)
-if err := engine.Init(); err != nil {
-    // handle init error
-}
-
-// Run full OCR on an image
-results, err := engine.RunOCR(img)
-// results: []ocr.Result with Box, Text, Score (and optional Children)
-
-// Or run detection only (text boxes, no recognition)
-boxes, err := engine.DetectOnly(img)
 ```
 
 ## Running the server
