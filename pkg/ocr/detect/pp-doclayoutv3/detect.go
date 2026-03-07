@@ -36,6 +36,8 @@ func (m *Model) GetName() string { return ModelName }
 
 func (m *Model) GetDefaultConfig() common.ModelConfig {
 	return &ModelConfig{
+		InputSize:      800,
+		ScoreThreshold: 0.3,
 		BaseModelConfig: common.BaseModelConfig{
 			OnnxConfig: common.Config{
 				ModelPath: filepath.Join("./models", "PP-DocLayoutV3.onnx"),
@@ -44,18 +46,12 @@ func (m *Model) GetDefaultConfig() common.ModelConfig {
 	}
 }
 
-func (m *Model) Init(config common.ModelConfig) error {
-	cfg, ok := config.(*ModelConfig)
+func (m *Model) Init(configSrc common.ConfigSource) error {
+	cfg, ok := configSrc.GetConfig(m.GetName()).(*ModelConfig)
 	if !ok {
-		return fmt.Errorf("ppdoclayoutv3: expected *ModelConfig, got %T", config)
+		cfg = m.GetDefaultConfig().(*ModelConfig)
 	}
-	if cfg.InputSize <= 0 {
-		cfg.InputSize = 800
-	}
-	if cfg.ScoreThreshold <= 0 {
-		cfg.ScoreThreshold = 0.3
-	}
-
+	m.config = cfg
 	inputNames, outputNames, err := common.InputOutputNames(cfg.OnnxConfig.ModelPath, cfg.OnnxConfig.Options)
 	if err != nil {
 		return err

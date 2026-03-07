@@ -27,11 +27,11 @@ type ModelConfig struct {
 }
 
 // ---------------------------------------------------------------------------
-// Model implements recognize.Recognizer via an OpenAI-compatible chat/completions API
+// Model implements recognize.recognizer via an OpenAI-compatible chat/completions API
 // ---------------------------------------------------------------------------
 
 type Model struct {
-	config ModelConfig
+	config *ModelConfig
 	client *http.Client
 }
 
@@ -46,34 +46,27 @@ func (m *Model) GetDefaultConfig() common.ModelConfig {
 		Endpoint:        "http://localhost:8000/v1",
 		APIKey:          "",
 		Model:           "zai-org/GLM-OCR",
-		SystemPrompt:    "You are an OCR assistant. Output only the exact text you see, with no explanation.",
-		UserPrompt:      "Please transcribe all text in this image exactly as it appears.",
+		SystemPrompt:    "",
+		UserPrompt:      "Text Recognition:",
 		BaseModelConfig: common.BaseModelConfig{},
 	}
 }
 
-func (m *Model) Init(config common.ModelConfig) error {
-	cfg, ok := config.(*ModelConfig)
+func (m *Model) Init(configSrc common.ConfigSource) error {
+	cfg, ok := configSrc.GetConfig(m.GetName()).(*ModelConfig)
 	if !ok {
-		return fmt.Errorf("openai recognizer: expected *ModelConfig, got %T", config)
+		cfg = m.GetDefaultConfig().(*ModelConfig)
 	}
-	if cfg.Endpoint == "" {
-		return fmt.Errorf("openai recognizer: Endpoint is required")
-	}
-	if cfg.Model == "" {
-		return fmt.Errorf("openai recognizer: Model is required")
-	}
-	if cfg.SystemPrompt == "" {
-		cfg.SystemPrompt = "You are an OCR assistant. Output only the exact text you see, with no explanation."
-	}
-	if cfg.UserPrompt == "" {
-		cfg.UserPrompt = "Please transcribe all text in this image exactly as it appears."
-	}
-	m.config = *cfg
+	m.config = cfg
 	return nil
 }
 
 func (m *Model) Close() error { return nil }
+
+func (m *Model) RecognizeLineOnly() bool {
+	// This model works best with larger regions and can handle multi-line text.
+	return false
+}
 
 // Recognize crops the quad region and sends it to the OpenAI-compatible API for recognition.
 func (m *Model) Recognize(img image.Image, quad [4][2]int) (recognize.Result, error) {

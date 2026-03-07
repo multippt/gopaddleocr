@@ -1,6 +1,10 @@
 package recognize
 
-import "image"
+import (
+	"image"
+
+	"github.com/multippt/gopaddleocr/pkg/ocr/common"
+)
 
 type Result struct {
 	Text  string
@@ -8,6 +12,8 @@ type Result struct {
 }
 
 type Recognizer interface {
+	common.Model
+	RecognizeLineOnly() bool
 	Recognize(img image.Image, quad [4][2]int) (Result, error)
 	Close() error
 }

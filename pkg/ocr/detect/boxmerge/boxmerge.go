@@ -10,6 +10,7 @@ import (
 	"github.com/multippt/gopaddleocr/pkg/ocr/common"
 	"github.com/multippt/gopaddleocr/pkg/ocr/detect"
 	"github.com/multippt/gopaddleocr/pkg/ocr/utils"
+	"golang.org/x/sync/errgroup"
 )
 
 const ModelName = "box-merge"
@@ -24,8 +25,8 @@ const (
 	Statistical
 )
 
-// Config configures the BoxMerge detector (strategy parameters only).
-type Config struct {
+// ModelConfig configures the BoxMerge detector (strategy parameters only).
+type ModelConfig struct {
 	common.BaseModelConfig
 
 	Strategy Strategy
@@ -40,22 +41,22 @@ type Config struct {
 
 // Model implements detect.Detector by merging child boxes into parent groups.
 type Model struct {
-	config         *Config
-	childDetector  detect.Detector
+	config         *ModelConfig
 	parentDetector detect.Detector
+	childDetector  detect.Detector
 }
 
-func NewModel(childDetector, parentDetector detect.Detector) *Model {
+func NewModel(parentDetector, childDetector detect.Detector) *Model {
 	return &Model{
-		childDetector:  childDetector,
 		parentDetector: parentDetector,
+		childDetector:  childDetector,
 	}
 }
 
 func (m *Model) GetName() string { return ModelName }
 
 func (m *Model) GetDefaultConfig() common.ModelConfig {
-	return &Config{
+	return &ModelConfig{
 		Strategy:         Statistical,
 		MinOverlapRatio:  0.8,
 		MaxMergeDistance: 10,
@@ -64,8 +65,21 @@ func (m *Model) GetDefaultConfig() common.ModelConfig {
 	}
 }
 
-func (m *Model) Init(config common.ModelConfig) error {
-	m.config = config.(*Config)
+func (m *Model) initModelWrapper(model common.Model, configSrc common.ConfigSource) func() error {
+	return func() error {
+		return model.Init(configSrc)
+	}
+}
+
+func (m *Model) Init(configSrc common.ConfigSource) error {
+	cfg, ok := configSrc.GetConfig(m.GetName()).(*ModelConfig)
+	if !ok {
+		cfg = m.GetDefaultConfig().(*ModelConfig)
+	}
+	m.config = cfg
+	var eg errgroup.Group
+	eg.Go(m.initModelWrapper(m.childDetector, configSrc))
+	eg.Go(m.initModelWrapper(m.parentDetector, configSrc))
 	return nil
 }
 

@@ -54,16 +54,17 @@ func (m *Model) GetDefaultConfig() common.ModelConfig {
 	}
 }
 
-func (m *Model) Init(config common.ModelConfig) error {
-	cfg, ok := config.(*ModelConfig)
+func (m *Model) Init(configSrc common.ConfigSource) error {
+	cfg, ok := configSrc.GetConfig(m.GetName()).(*ModelConfig)
 	if !ok {
-		return fmt.Errorf("recognize/paddleocr: expected *ModelConfig, got %T", config)
+		cfg = m.GetDefaultConfig().(*ModelConfig)
 	}
+	m.config = cfg
+
 	dict, err := NewCharsetDict(cfg.OnnxConfig.ModelPath, cfg.DictPath)
 	if err != nil {
 		return fmt.Errorf("char dict: %w", err)
 	}
-	m.config = cfg
 	m.charDict = dict
 	inputNames, outputNames, err := common.InputOutputNames(cfg.OnnxConfig.ModelPath, cfg.OnnxConfig.Options)
 	if err != nil {
@@ -85,6 +86,12 @@ func (m *Model) Close() error {
 		return m.session.Destroy()
 	}
 	return nil
+}
+
+func (m *Model) RecognizeLineOnly() bool {
+	// This model only operates on line-level recognitions.
+	// We should only traverse child elements obtained for detection.
+	return true
 }
 
 // Recognize recognizes text in the region defined by quad (already ordered tl→tr→br→bl).

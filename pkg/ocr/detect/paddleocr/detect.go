@@ -57,10 +57,10 @@ func (m *Model) GetDefaultConfig() common.ModelConfig {
 	}
 }
 
-func (m *Model) Init(config common.ModelConfig) error {
-	cfg, ok := config.(*ModelConfig)
+func (m *Model) Init(configSrc common.ConfigSource) error {
+	cfg, ok := configSrc.GetConfig(m.GetName()).(*ModelConfig)
 	if !ok {
-		return fmt.Errorf("detect/paddleocr: expected *ModelConfig, got %T", config)
+		cfg = m.GetDefaultConfig().(*ModelConfig)
 	}
 	m.config = cfg
 	inputNames, outputNames, err := common.InputOutputNames(cfg.OnnxConfig.ModelPath, cfg.OnnxConfig.Options)

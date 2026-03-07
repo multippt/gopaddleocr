@@ -8,9 +8,13 @@ import (
 
 type Model interface {
 	GetName() string
-	Init(config ModelConfig) error
+	Init(config ConfigSource) error
 	GetDefaultConfig() ModelConfig
 	Close() error
+}
+
+type ConfigSource interface {
+	GetConfig(modelName string) ModelConfig
 }
 
 type Config struct {

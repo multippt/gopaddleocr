@@ -1,14 +1,13 @@
 package classify
 
-import "image"
+import (
+	"image"
+
+	"github.com/multippt/gopaddleocr/pkg/ocr/common"
+)
 
 type Classifier interface {
+	common.Model
 	Classify(img image.Image, quad [4][2]int) (rotated bool, err error)
 	Close() error
 }
-
-// StubClassifier always returns (false, nil) — no rotation needed.
-type StubClassifier struct{}
-
-func (StubClassifier) Classify(_ image.Image, _ [4][2]int) (bool, error) { return false, nil }
-func (StubClassifier) Close() error                                       { return nil }
