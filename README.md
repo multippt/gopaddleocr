@@ -2,13 +2,29 @@
 
 Golang implementation of PaddleOCR based on onnxruntime.
 
+## Quick Start
+
+For Linux / macOS:
+```bash
+./download_onnx.sh
+./download_models.sh
+go run .
+```
+
+For Windows:
+```bash
+download_onnx.bat
+download_models.bat
+go run .
+```
+
 ## Prerequisites
 
 ### CGO
 
-This project uses [onnxruntime_go](https://github.com/yalue/onnxruntime_go), which depends on the ONNX Runtime C API. You must build with **CGO enabled** (the default when a C compiler is available). Ensure a C toolchain is installed:
+This project uses [onnxruntime_go](https://github.com/yalue/onnxruntime_go), which depends on the ONNX Runtime C API. You must build with **CGO enabled**, ensure a C toolchain is installed:
 
-- **Windows:** Install [MinGW-w64](https://www.mingw-w64.org/) or use the compiler that comes with MSVC build tools, and have `gcc` (or `cc`) on your PATH.
+- **Windows:** Install [MinGW-w64](https://www.mingw-w64.org/) or [TDM-GCC](https://jmeubank.github.io/tdm-gcc/), and have `gcc` (or `cc`) on your PATH.
 - **Linux:** `sudo apt install build-essential` (Debian/Ubuntu) or equivalent.
 - **macOS:** Xcode Command Line Tools: `xcode-select --install`.
 
@@ -18,31 +34,31 @@ The engine loads the ONNX Runtime shared library at runtime. The repo includes s
 
 **Using the download scripts:**
 
-- **Linux / macOS:** From the project root, run `./download_onnx.sh`. Requires `curl`. Optional: set `ORT_VERSION` (default `1.24.2`).
-- **Windows:** From the project root, run `download_onnx.bat`. Requires `curl` and PowerShell. Optional: set env `ORT_VERSION`.
+- **Linux / macOS:** From the project root, run `./download_onnx.sh`.
+- **Windows:** From the project root, run `download_onnx.bat`.
 
-The scripts create `./onnxruntime/` with the correct `lib/` layout. If the directory already exists, they skip the download.
+**Manual setup:** 
 
-**Manual setup:** Download a prebuilt package from [ONNX Runtime releases](https://github.com/microsoft/onnxruntime/releases), extract it so the shared library is at `./onnxruntime/lib/` (`onnxruntime.dll` on Windows, `libonnxruntime.so` on Linux, `libonnxruntime.dylib` on macOS). To use a different path, set environment variable `ORT_LIB_PATH` to the full path of the library file.
+Download a prebuilt package from [ONNX Runtime releases](https://github.com/microsoft/onnxruntime/releases), extract it ./onnxruntime relative to the working directory. To use a different path, set environment variable `ORT_LIB_PATH` to the full path of the library file.
 
 ### Model download
 
 The default PaddleOCR workflow expects the following files under `./models/` (relative to the process working directory):
 
-| File | Description |
-|------|-------------|
-| `ch_PP-OCRv5_server_det.onnx` | Detection model |
-| `ch_ppocr_mobile_v2.0_cls_infer.onnx` | Direction classifier |
-| `ch_PP-OCRv5_rec_server_infer.onnx` | Recognition model |
+| File | Description | Download Link                                                                   |
+|------|-------------|---------------------------------------------------------------------------------|
+| `ch_PP-OCRv5_server_det.onnx` | Detection model | https://www.modelscope.cn/models/RapidAI/RapidOCR/tree/master/onnx/PP-OCRv5/det |
+| `ch_ppocr_mobile_v2.0_cls_infer.onnx` | Direction classifier | https://www.modelscope.cn/models/RapidAI/RapidOCR/tree/master/onnx/PP-OCRv4/cls |
+| `ch_PP-OCRv5_rec_server_infer.onnx` | Recognition model | https://www.modelscope.cn/models/RapidAI/RapidOCR/tree/master/onnx/PP-OCRv5/rec |
 
 **Using the download scripts:**
 
-- **Linux / macOS:** From the project root, run `./download_models.sh`. Downloads the three ONNX files (and `PP-DocLayoutV3.onnx`) from [RapidOCR on ModelScope](https://www.modelscope.cn/models/RapidAI/RapidOCR/tree/master/onnx/) and Hugging Face into `./models/`. Requires `curl`.
-- **Windows:** From the project root, run `download_models.bat`. Same set of models into `./models/`. Requires `curl`.
+For simplicity, the models can be quickly downloaded with the scripts.
 
-**Manual setup:** Use the same sources as the scripts to avoid compatibility issues. Download from [RapidOCR on ModelScope](https://www.modelscope.cn/models/RapidAI/RapidOCR/tree/master/onnx/): `PP-OCRv5/det/ch_PP-OCRv5_server_det.onnx`, `PP-OCRv5/rec/ch_PP-OCRv5_rec_server_infer.onnx`, and `PP-OCRv4/cls/ch_ppocr_mobile_v2.0_cls_infer.onnx` (save into `./models/` with the names from the table). For layout detection, [PP-DocLayoutV3-ONNX](https://huggingface.co/alex-dinh/PP-DocLayoutV3-ONNX/resolve/main/PP-DocLayoutV3.onnx) → `./models/PP-DocLayoutV3.onnx`. To use a different directory or filenames, configure the engine with `ocr.WithModelConfig` before calling `Init()`.
+- **Linux / macOS:** From the project root, run `./download_models.sh`.
+- **Windows:** From the project root, run `download_models.bat`.
 
-## Using the engine as a library
+## Usage (Library)
 
 Import the OCR package and create an engine with optional configuration:
 
@@ -51,60 +67,53 @@ package main
 
 import (
 	"fmt"
-	"image"
+	_ "image/jpeg"
 	_ "image/png"
-	"os"
+	"io"
+	"net/http"
 
 	"github.com/multippt/gopaddleocr/pkg/ocr"
 )
 
-func main() {
-	// Load an image from file.
-	f, err := os.Open("image.png")
+func downloadImage(url string) ([]byte, error) {
+	resp, err := http.Get(url)
 	if err != nil {
-		fmt.Printf("%v\n", err)
-		return
+		return nil, err
 	}
-	defer f.Close()
-	img, _, err := image.Decode(f)
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
+}
+
+func main() {
+	data, err := downloadImage(
+		"https://paddle-model-ecology.bj.bcebos.com/paddlex/imgs/demo_image/general_ocr_002.png")
 	if err != nil {
 		fmt.Printf("%v\n", err)
 		return
 	}
 
-	// Create engine (optional: ocr.WithModelConfig, ocr.WithWorkflowType, ocr.WithBoxMerge)
-	engine := ocr.NewEngine(
-		ocr.WithWorkflowType("PaddleOCR"), // or "GLM-OCR"
-		ocr.WithBoxMerge(true),
-	)
+	engine := ocr.NewEngine()
 	defer engine.Close()
 
-	// Set ORT_LIB_PATH if needed (default: ./onnxruntime/lib/onnxruntime.dll)
 	if err := engine.Init(); err != nil {
 		fmt.Printf("%v\n", err)
 		return
 	}
 
-	// Run full OCR on an image
-	results, _ := engine.RunOCR(img)
+	results, err := engine.RunOCR(data)
+	if err != nil {
+		fmt.Printf("%v\n", err)
+		return
+	}
+
 	// results: []ocr.Result with Box, Text, Score (and optional Children)
 	fmt.Printf("%v\n", results)
-
-	// Or run detection only (text boxes, no recognition)
-	boxes, _ := engine.DetectOnly(img)
-	fmt.Printf("%v\n", boxes)
 }
 ```
 
-## Running the server
+## Usage (Server)
 
-From the project root:
-
-```bash
-go run .
-```
-
-The listening address can be revised with `-listen` or `-l`:
+A basic server has been provided which exposes a basic OCR endpoint at `/ocr`.
 
 ```bash
 go run . -listen 0.0.0.0:8051
@@ -113,8 +122,7 @@ go run . -listen 0.0.0.0:8051
 ### Example request
 
 ```bash
-curl -X POST http://localhost:8051/ocr \
-  -F "image=@/path/to/your/image.png"
+curl -X POST http://localhost:8051/ocr -F "image=@./image.png"
 ```
 
 ### Example response
@@ -134,3 +142,9 @@ curl -X POST http://localhost:8051/ocr \
   "elapsed_ms": 45.2
 }
 ```
+
+# License
+
+The Paddle-OCR models originate from the Baidu's PaddlePaddle [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) project.
+
+This project is released under the Apache 2.0 license.

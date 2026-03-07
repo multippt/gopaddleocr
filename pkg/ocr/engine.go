@@ -1,6 +1,7 @@
 package ocr
 
 import (
+	"bytes"
 	"errors"
 	"image"
 	"os"
@@ -138,10 +139,34 @@ func (e *Engine) getWorkflow() (*Workflow, error) {
 	return factory(e.config, e), nil
 }
 
-func (e *Engine) RunOCR(img image.Image) ([]Result, error) {
+func (e *Engine) decodeImage(data []byte) (image.Image, error) {
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	return img, err
+}
+
+func (e *Engine) RunOCR(data []byte) ([]Result, error) {
+	img, err := e.decodeImage(data)
+	if err != nil {
+		return nil, err
+	}
 	return e.workflow.RunOCR(img)
 }
 
-func (e *Engine) DetectOnly(img image.Image) ([]utils.Box, error) {
+func (e *Engine) ImageRunOCR(img image.Image) ([]Result, error) {
+	return e.workflow.RunOCR(img)
+}
+
+func (e *Engine) DetectBoundingBoxes(data []byte) ([]utils.Box, error) {
+	img, err := e.decodeImage(data)
+	if err != nil {
+		return nil, err
+	}
+	return e.workflow.DetectOnly(img)
+}
+
+func (e *Engine) ImageDetectBoundingBoxes(img image.Image) ([]utils.Box, error) {
 	return e.workflow.DetectOnly(img)
 }

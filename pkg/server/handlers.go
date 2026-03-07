@@ -33,7 +33,7 @@ func (s *Server) handleOCR(c *gin.Context) {
 	}
 
 	t0 := time.Now()
-	results, err := s.ocrEngine.RunOCR(img)
+	results, err := s.ocrEngine.ImageRunOCR(img)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
 		return
@@ -61,7 +61,7 @@ func (s *Server) handleDetect(c *gin.Context) {
 	}
 
 	t0 := time.Now()
-	detBoxes, err := s.ocrEngine.DetectOnly(img)
+	detBoxes, err := s.ocrEngine.ImageDetectBoundingBoxes(img)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
 		return
@@ -119,7 +119,7 @@ func (s *Server) handleSessionDetect(c *gin.Context) {
 	}
 
 	t0 := time.Now()
-	detBoxes, err := s.ocrEngine.DetectOnly(img)
+	detBoxes, err := s.ocrEngine.ImageDetectBoundingBoxes(img)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
 		return
@@ -159,7 +159,7 @@ func (s *Server) handleSessionOCR(c *gin.Context) {
 }
 
 func (s *Server) runSessionOCRFull(img image.Image, t0 time.Time) OCRResponse {
-	results, err := s.ocrEngine.RunOCR(img)
+	results, err := s.ocrEngine.ImageRunOCR(img)
 	elapsed := float64(time.Since(t0).Microseconds()) / 1000.0
 	if err != nil || len(results) == 0 {
 		return OCRResponse{Results: []OCRLine{}, ElapsedMs: elapsed}
@@ -179,7 +179,7 @@ func (s *Server) runSessionOCRWithBoxes(img image.Image, req SessionOCRReq, t0 t
 		cropped := cropByQuad(img, quad)
 
 		bT0 := time.Now()
-		results, err := s.ocrEngine.RunOCR(cropped)
+		results, err := s.ocrEngine.ImageRunOCR(cropped)
 		totalElapsed += float64(time.Since(bT0).Microseconds()) / 1000.0
 		if err != nil || len(results) == 0 {
 			continue
