@@ -2,7 +2,6 @@ package server
 
 import (
 	"image"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -15,20 +14,17 @@ import (
 )
 
 func (s *Server) handleHealth(c *gin.Context) {
+	if s.ocrEngine == nil || !s.ocrEngine.IsReady() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"detail": "ocr engine not ready"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
 func (s *Server) handleOCR(c *gin.Context) {
-	data, err := parseImageBytes(c)
-	if err != nil || data == nil {
-		log.Printf("Error parsing image bytes: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "invalid or missing image"})
-		return
-	}
-	img, err := decodeImage(data)
+	img, err := s.parseImage(c)
 	if err != nil {
-		log.Printf("Error decoding image: %v %v", len(data), err)
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "cannot decode image: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "invalid or missing image"})
 		return
 	}
 
@@ -49,42 +45,19 @@ func (s *Server) handleOCR(c *gin.Context) {
 }
 
 func (s *Server) handleDetect(c *gin.Context) {
-	data, err := parseImageBytes(c)
-	if err != nil || data == nil {
+	img, err := s.parseImage(c)
+	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "invalid or missing image"})
 		return
 	}
-	img, err := decodeImage(data)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "cannot decode image: " + err.Error()})
-		return
-	}
 
-	t0 := time.Now()
-	detBoxes, err := s.ocrEngine.ImageDetectBoundingBoxes(img)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
-		return
-	}
-	elapsed := float64(time.Since(t0).Microseconds()) / 1000.0
-
-	boxes := make([][][2]int, len(detBoxes))
-	for i, b := range detBoxes {
-		q := b.Quad
-		boxes[i] = [][2]int{q[0], q[1], q[2], q[3]}
-	}
-	c.JSON(http.StatusOK, DetectResponse{Boxes: boxes, ElapsedMs: elapsed})
+	s.doImageDetect(c, img)
 }
 
 func (s *Server) handleSessionCreate(c *gin.Context) {
-	data, err := parseImageBytes(c)
-	if err != nil || data == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "invalid or missing image"})
-		return
-	}
-	img, err := decodeImage(data)
+	img, err := s.parseImage(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "cannot decode image: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "invalid or missing image"})
 		return
 	}
 
@@ -104,9 +77,7 @@ func (s *Server) handleSessionDelete(c *gin.Context) {
 }
 
 func (s *Server) handleSessionDetect(c *gin.Context) {
-	var req struct {
-		SessionID string `json:"session_id"`
-	}
+	var req SessionReq
 	if err := c.ShouldBindJSON(&req); err != nil || req.SessionID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "missing session_id"})
 		return
@@ -118,6 +89,10 @@ func (s *Server) handleSessionDetect(c *gin.Context) {
 		return
 	}
 
+	s.doImageDetect(c, img)
+}
+
+func (s *Server) doImageDetect(c *gin.Context, img image.Image) {
 	t0 := time.Now()
 	detBoxes, err := s.ocrEngine.ImageDetectBoundingBoxes(img)
 	if err != nil {

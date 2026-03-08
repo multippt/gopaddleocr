@@ -40,8 +40,12 @@ type BoundingBoxReq struct {
 	Y4 int `json:"y4"`
 }
 
+type SessionReq struct {
+	SessionID string `json:"session_id"`
+}
+
 type SessionOCRReq struct {
-	SessionID     string           `json:"session_id"`
+	SessionReq
 	Language      string           `json:"language,omitempty"`
 	Model         string           `json:"model,omitempty"`
 	BoundingBoxes []BoundingBoxReq `json:"bounding_boxes,omitempty"`

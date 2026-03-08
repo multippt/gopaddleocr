@@ -1,18 +1,13 @@
 package server
 
 import (
-	"bytes"
 	"encoding/base64"
 	"image"
-	"image/draw"
-	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
 	"io"
-	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pkg/errors"
 	_ "golang.org/x/image/webp"
 )
 
@@ -20,7 +15,22 @@ import (
 // Helper: parse image bytes from multipart or JSON request
 // ---------------------------------------------------------------------------
 
-func parseImageBytes(c *gin.Context) ([]byte, error) {
+func (s *Server) parseImage(c *gin.Context) (image.Image, error) {
+	data, err := s.parseImageBytes(c)
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot parse image")
+	}
+	if data == nil {
+		return nil, errors.New("empty image")
+	}
+	img, err := s.ocrEngine.DecodeImage(data)
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot decode image")
+	}
+	return img, nil
+}
+
+func (s *Server) parseImageBytes(c *gin.Context) ([]byte, error) {
 	ct := c.GetHeader("Content-Type")
 	switch {
 	case strings.Contains(ct, "multipart/form-data"):
@@ -28,7 +38,9 @@ func parseImageBytes(c *gin.Context) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		defer f.Close()
+		defer func() {
+			_ = f.Close()
+		}()
 		return io.ReadAll(f)
 
 	case strings.Contains(ct, "application/json"):
@@ -50,18 +62,6 @@ func parseImageBytes(c *gin.Context) ([]byte, error) {
 		return raw, nil
 
 	default:
-		c.Status(http.StatusUnsupportedMediaType)
-		return nil, nil
+		return nil, errors.New("unsupported content type")
 	}
-}
-
-func decodeImage(data []byte) (image.Image, error) {
-	img, _, err := image.Decode(bytes.NewReader(data))
-	if err != nil {
-		return nil, err
-	}
-	// Normalise to RGBA
-	rgba := image.NewRGBA(img.Bounds())
-	draw.Draw(rgba, rgba.Bounds(), img, img.Bounds().Min, draw.Src)
-	return rgba, nil
 }

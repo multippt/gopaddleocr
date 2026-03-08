@@ -2,8 +2,6 @@ package main
 
 import (
 	"fmt"
-	_ "image/jpeg"
-	_ "image/png"
 	"io"
 	"net/http"
 

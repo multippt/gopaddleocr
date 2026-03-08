@@ -4,9 +4,16 @@ import (
 	"bytes"
 	"errors"
 	"image"
+	"image/draw"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"os"
 	"runtime"
 	"sync"
+	"sync/atomic"
+
+	_ "golang.org/x/image/webp"
 
 	"github.com/multippt/gopaddleocr/pkg/ocr/common"
 	"github.com/multippt/gopaddleocr/pkg/ocr/utils"
@@ -48,6 +55,7 @@ type Config struct {
 type Engine struct {
 	once    sync.Once
 	loadErr error
+	ready   int32
 
 	knownWorkflows map[string]WorkflowFactory
 	workflow       *Workflow
@@ -77,6 +85,8 @@ func NewEngine(opts ...Option) *Engine {
 
 // Close releases all model resources.
 func (e *Engine) Close() error {
+	atomic.StoreInt32(&e.ready, 0)
+
 	var err error
 	if e.workflow != nil {
 		err = e.workflow.Close()
@@ -120,7 +130,16 @@ func (e *Engine) Init() error {
 			return err
 		}
 	}
-	return e.workflow.Init()
+	err = e.workflow.Init()
+	if err != nil {
+		return err
+	}
+	atomic.StoreInt32(&e.ready, 1)
+	return nil
+}
+
+func (e *Engine) IsReady() bool {
+	return atomic.LoadInt32(&e.ready) == 1
 }
 
 func (e *Engine) GetConfig(modelName string) common.ModelConfig {
@@ -139,16 +158,19 @@ func (e *Engine) getWorkflow() (*Workflow, error) {
 	return factory(e.config, e), nil
 }
 
-func (e *Engine) decodeImage(data []byte) (image.Image, error) {
+func (e *Engine) DecodeImage(data []byte) (image.Image, error) {
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
-	return img, err
+
+	rgba := image.NewRGBA(img.Bounds())
+	draw.Draw(rgba, rgba.Bounds(), img, img.Bounds().Min, draw.Src)
+	return rgba, nil
 }
 
 func (e *Engine) RunOCR(data []byte) ([]Result, error) {
-	img, err := e.decodeImage(data)
+	img, err := e.DecodeImage(data)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +182,7 @@ func (e *Engine) ImageRunOCR(img image.Image) ([]Result, error) {
 }
 
 func (e *Engine) DetectBoundingBoxes(data []byte) ([]utils.Box, error) {
-	img, err := e.decodeImage(data)
+	img, err := e.DecodeImage(data)
 	if err != nil {
 		return nil, err
 	}
