@@ -299,8 +299,8 @@ func TestDetPostprocess_SimpleRect(t *testing.T) {
 		}
 	}
 
-	m := &Model{config: testDetConfig}
-	boxes := m.postprocess(prob, padH, padW, resH, resW, origH, origW)
+	m := &Model{}
+	boxes := m.postprocess(testDetConfig, prob, padH, padW, resH, resW, origH, origW)
 	if len(boxes) == 0 {
 		t.Fatal("expected at least one box, got none")
 	}
@@ -348,8 +348,8 @@ func TestDetPostprocess_TinyRegionFiltered(t *testing.T) {
 			prob[y*padW+x] = 0.8
 		}
 	}
-	m := &Model{config: testDetConfig}
-	boxes := m.postprocess(prob, padH, padW, padH, padW, padH, padW)
+	m := &Model{}
+	boxes := m.postprocess(testDetConfig, prob, padH, padW, padH, padW, padH, padW)
 	if len(boxes) != 0 {
 		t.Errorf("expected 0 boxes for tiny region, got %d", len(boxes))
 	}
@@ -371,8 +371,8 @@ func TestDetPostprocess_MultipleRegions(t *testing.T) {
 			prob[y*padW+x] = 0.9
 		}
 	}
-	m := &Model{config: testDetConfig}
-	boxes := m.postprocess(prob, padH, padW, padH, padW, padH, padW)
+	m := &Model{}
+	boxes := m.postprocess(testDetConfig, prob, padH, padW, padH, padW, padH, padW)
 	if len(boxes) != 2 {
 		t.Errorf("expected 2 boxes for two separated bands, got %d", len(boxes))
 	}
@@ -388,8 +388,8 @@ func TestDetPostprocess_BelowBoxThresh(t *testing.T) {
 			prob[y*padW+x] = 0.4
 		}
 	}
-	m := &Model{config: testDetConfig}
-	boxes := m.postprocess(prob, padH, padW, padH, padW, padH, padW)
+	m := &Model{}
+	boxes := m.postprocess(testDetConfig, prob, padH, padW, padH, padW, padH, padW)
 	if len(boxes) != 0 {
 		t.Errorf("expected 0 boxes when boxScore < BoxThresh, got %d", len(boxes))
 	}

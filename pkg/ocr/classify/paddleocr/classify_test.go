@@ -69,17 +69,16 @@ func TestClose_NoInit(t *testing.T) {
 
 func TestClassifyPreprocess_TensorSize(t *testing.T) {
 	cfg := NewModel().GetDefaultConfig().(*ModelConfig)
-	m := &Model{config: cfg}
 	img := newTextImage(300, 60, "Hello World")
 	// Valid axis-aligned quad covering the whole image.
 	quad := [4][2]int{{0, 0}, {299, 0}, {299, 59}, {0, 59}}
-	crop := utils.PerspectiveWarp(img, utils.FloatQuad(quad), m.config.Width, m.config.Height)
+	crop := utils.PerspectiveWarp(img, utils.FloatQuad(quad), cfg.Width, cfg.Height)
 	if crop == nil {
 		t.Fatal("PerspectiveWarp returned nil for valid quad")
 	}
-	data := utils.ImageToNCHW(crop, m.config.Height, m.config.Width, m.config.Mean, m.config.Std)
-	want := 3 * m.config.Height * m.config.Width
+	data := utils.ImageToNCHW(crop, cfg.Height, cfg.Width, cfg.Mean, cfg.Std)
+	want := 3 * cfg.Height * cfg.Width
 	if len(data) != want {
-		t.Errorf("tensor length=%d want %d (3×%d×%d)", len(data), want, m.config.Height, m.config.Width)
+		t.Errorf("tensor length=%d want %d (3×%d×%d)", len(data), want, cfg.Height, cfg.Width)
 	}
 }

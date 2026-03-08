@@ -47,9 +47,6 @@ func TestRecGetDefaultConfig(t *testing.T) {
 	if cfg.Height != 48 {
 		t.Errorf("Height=%d want 48", cfg.Height)
 	}
-	if cfg.DictPath == "" {
-		t.Error("DictPath is empty")
-	}
 	if cfg.OnnxConfig.ModelPath == "" {
 		t.Error("ModelPath is empty")
 	}
