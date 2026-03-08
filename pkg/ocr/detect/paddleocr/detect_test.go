@@ -162,6 +162,126 @@ func TestMinAreaRect_Rectangle(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// connectedComponents tests
+// ---------------------------------------------------------------------------
+
+func TestConnectedComponents_Empty(t *testing.T) {
+	mask := make([]bool, 5*5) // all false
+	comps := connectedComponents(mask, 5, 5)
+	if len(comps) != 0 {
+		t.Errorf("expected 0 components, got %d", len(comps))
+	}
+}
+
+func TestConnectedComponents_Single(t *testing.T) {
+	// 10×10 mask with a single 3×3 blob at (2,2)→(4,4).
+	W, H := 10, 10
+	mask := make([]bool, H*W)
+	for y := 2; y <= 4; y++ {
+		for x := 2; x <= 4; x++ {
+			mask[y*W+x] = true
+		}
+	}
+	comps := connectedComponents(mask, H, W)
+	if len(comps) != 1 {
+		t.Fatalf("expected 1 component, got %d", len(comps))
+	}
+	if len(comps[0]) != 9 {
+		t.Errorf("component pixel count=%d want 9", len(comps[0]))
+	}
+}
+
+func TestConnectedComponents_Two(t *testing.T) {
+	// Two separated 3×3 blobs with a gap of at least 1 pixel.
+	W, H := 20, 10
+	mask := make([]bool, H*W)
+	// Blob 1: cols 1–3, rows 1–3
+	for y := 1; y <= 3; y++ {
+		for x := 1; x <= 3; x++ {
+			mask[y*W+x] = true
+		}
+	}
+	// Blob 2: cols 10–12, rows 1–3 (gap of 6 columns)
+	for y := 1; y <= 3; y++ {
+		for x := 10; x <= 12; x++ {
+			mask[y*W+x] = true
+		}
+	}
+	comps := connectedComponents(mask, H, W)
+	if len(comps) != 2 {
+		t.Errorf("expected 2 components, got %d", len(comps))
+	}
+	for i, c := range comps {
+		if len(c) != 9 {
+			t.Errorf("component %d: pixel count=%d want 9", i, len(c))
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// convexHull tests
+// ---------------------------------------------------------------------------
+
+func TestConvexHull_Triangle(t *testing.T) {
+	pts := []fPoint{{0, 0}, {5, 0}, {2.5, 5}}
+	hull := convexHull(pts)
+	if len(hull) != 3 {
+		t.Errorf("expected 3-point hull for triangle, got %d", len(hull))
+	}
+}
+
+func TestConvexHull_Collinear(t *testing.T) {
+	// All points on y=0 — hull should not panic.
+	pts := []fPoint{{0, 0}, {1, 0}, {2, 0}, {3, 0}, {4, 0}}
+	_ = convexHull(pts) // must not panic
+}
+
+// ---------------------------------------------------------------------------
+// boxScore tests
+// ---------------------------------------------------------------------------
+
+func TestBoxScore_FullRect(t *testing.T) {
+	// 20×20 prob map filled with 0.8; polygon covers a 10×10 interior region.
+	W := 20
+	prob := make([]float32, 20*W)
+	for i := range prob {
+		prob[i] = 0.8
+	}
+	poly := [][2]float64{{2, 2}, {12, 2}, {12, 12}, {2, 12}}
+	score := boxScore(prob, W, poly)
+	if score < 0.75 || score > 0.85 {
+		t.Errorf("boxScore=%f want ≈0.8", score)
+	}
+}
+
+func TestBoxScore_EmptyPoly(t *testing.T) {
+	prob := make([]float32, 20*20)
+	score := boxScore(prob, 20, nil)
+	if score != 0 {
+		t.Errorf("boxScore for empty poly=%f want 0", score)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// lineLineIntersect tests
+// ---------------------------------------------------------------------------
+
+func TestLineLineIntersect_Perpendicular(t *testing.T) {
+	// Horizontal line y=3: (0,3)→(10,3); Vertical line x=5: (5,0)→(5,10).
+	p := lineLineIntersect([2]float64{0, 3}, [2]float64{10, 3}, [2]float64{5, 0}, [2]float64{5, 10})
+	if math.Abs(p[0]-5) > 0.01 || math.Abs(p[1]-3) > 0.01 {
+		t.Errorf("intersection=%v want [5,3]", p)
+	}
+}
+
+func TestLineLineIntersect_Parallel(t *testing.T) {
+	// Two parallel horizontal lines — should return midpoint, no panic.
+	p := lineLineIntersect([2]float64{0, 0}, [2]float64{10, 0}, [2]float64{0, 5}, [2]float64{10, 5})
+	// Midpoint of p2 and p3 end-points (fallback): ((10+0)/2, (0+5)/2) = (5, 2.5)
+	_ = p // just must not panic
+}
+
+// ---------------------------------------------------------------------------
 // Full pipeline smoke test: synthesise a probability map and verify boxes
 // ---------------------------------------------------------------------------
 
@@ -216,5 +336,61 @@ func TestDetPostprocess_SimpleRect(t *testing.T) {
 	// Width should also be expanded.
 	if gotW <= 50 {
 		t.Errorf("width %d should be > 50 (unclip should expand)", gotW)
+	}
+}
+
+func TestDetPostprocess_TinyRegionFiltered(t *testing.T) {
+	// A 3×3 blob (9 pixels) is below MinArea=16 and must be filtered out.
+	padH, padW := 64, 64
+	prob := make([]float32, padH*padW)
+	for y := 10; y <= 12; y++ {
+		for x := 10; x <= 12; x++ {
+			prob[y*padW+x] = 0.8
+		}
+	}
+	m := &Model{config: testDetConfig}
+	boxes := m.postprocess(prob, padH, padW, padH, padW, padH, padW)
+	if len(boxes) != 0 {
+		t.Errorf("expected 0 boxes for tiny region, got %d", len(boxes))
+	}
+}
+
+func TestDetPostprocess_MultipleRegions(t *testing.T) {
+	// Two separated horizontal bands → 2 boxes.
+	padH, padW := 128, 128
+	prob := make([]float32, padH*padW)
+	// Band 1: rows 10–18, cols 5–100
+	for y := 10; y <= 18; y++ {
+		for x := 5; x <= 100; x++ {
+			prob[y*padW+x] = 0.9
+		}
+	}
+	// Band 2: rows 50–58, cols 5–100 (28 row gap — no 4-connectivity)
+	for y := 50; y <= 58; y++ {
+		for x := 5; x <= 100; x++ {
+			prob[y*padW+x] = 0.9
+		}
+	}
+	m := &Model{config: testDetConfig}
+	boxes := m.postprocess(prob, padH, padW, padH, padW, padH, padW)
+	if len(boxes) != 2 {
+		t.Errorf("expected 2 boxes for two separated bands, got %d", len(boxes))
+	}
+}
+
+func TestDetPostprocess_BelowBoxThresh(t *testing.T) {
+	// Region pixels above Thresh (0.3) but mean below BoxThresh (0.6) → 0 boxes.
+	padH, padW := 64, 64
+	prob := make([]float32, padH*padW)
+	// 6×6 = 36 pixels (> MinArea=16); prob=0.4 → above Thresh but below BoxThresh.
+	for y := 10; y <= 15; y++ {
+		for x := 10; x <= 15; x++ {
+			prob[y*padW+x] = 0.4
+		}
+	}
+	m := &Model{config: testDetConfig}
+	boxes := m.postprocess(prob, padH, padW, padH, padW, padH, padW)
+	if len(boxes) != 0 {
+		t.Errorf("expected 0 boxes when boxScore < BoxThresh, got %d", len(boxes))
 	}
 }

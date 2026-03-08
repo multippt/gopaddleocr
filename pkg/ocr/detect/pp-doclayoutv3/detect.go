@@ -157,6 +157,12 @@ func (m *Model) Detect(img image.Image) ([]utils.Box, error) {
 	}
 	N := int(outShape[0])
 
+	return m.postprocess(raw, N, origW, origH), nil
+}
+
+// postprocess converts raw ONNX output (N×7 flat float32) into sorted, clamped Box values.
+// Each row is [label_id, score, xmin, ymin, xmax, ymax, read_order].
+func (m *Model) postprocess(raw []float32, N, origW, origH int) []utils.Box {
 	type rawBox struct {
 		classID                int
 		score                  float64
@@ -186,13 +192,22 @@ func (m *Model) Detect(img image.Image) ([]utils.Box, error) {
 		return candidates[i].order < candidates[j].order
 	})
 
+	clampW := origW - 1
+	clampH := origH - 1
+	if clampW < 0 {
+		clampW = 0
+	}
+	if clampH < 0 {
+		clampH = 0
+	}
+
 	boxes := make([]utils.Box, len(candidates))
 	for i, c := range candidates {
 		// Axis-aligned box → [TL, TR, BR, BL] quad.
-		xMin := utils.ClampInt(int(c.xmin), 0, origW-1)
-		yMin := utils.ClampInt(int(c.ymin), 0, origH-1)
-		xMax := utils.ClampInt(int(c.xmax), 0, origW-1)
-		yMax := utils.ClampInt(int(c.ymax), 0, origH-1)
+		xMin := utils.ClampInt(int(c.xmin), 0, clampW)
+		yMin := utils.ClampInt(int(c.ymin), 0, clampH)
+		xMax := utils.ClampInt(int(c.xmax), 0, clampW)
+		yMax := utils.ClampInt(int(c.ymax), 0, clampH)
 		quad := [4][2]int{
 			{xMin, yMin}, // TL
 			{xMax, yMin}, // TR
@@ -206,5 +221,5 @@ func (m *Model) Detect(img image.Image) ([]utils.Box, error) {
 			Order:   c.order,
 		}
 	}
-	return boxes, nil
+	return boxes
 }
