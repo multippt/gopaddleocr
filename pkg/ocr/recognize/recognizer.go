@@ -14,6 +14,6 @@ type Result struct {
 type Recognizer interface {
 	common.Model
 	RecognizeLineOnly() bool
-	Recognize(img image.Image, quad [4][2]int) (Result, error)
+	Recognize(img image.Image, quad [4][2]int) (*Result, error)
 	Close() error
 }

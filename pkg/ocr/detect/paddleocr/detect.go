@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"image"
 	"math"
-	"path/filepath"
 
 	"github.com/multippt/gopaddleocr/pkg/ocr/common"
 	"github.com/multippt/gopaddleocr/pkg/ocr/utils"
@@ -30,12 +29,13 @@ type ModelConfig struct {
 // ---------------------------------------------------------------------------
 
 type Model struct {
-	session *ort.DynamicAdvancedSession
-	config  *ModelConfig
+	*common.OnnxModel
 }
 
 func NewModel() *Model {
-	return &Model{}
+	m := &Model{}
+	m.OnnxModel = common.NewOnnxModel(m)
+	return m
 }
 
 func (m *Model) GetName() string { return ModelName }
@@ -51,52 +51,29 @@ func (m *Model) GetDefaultConfig() common.ModelConfig {
 		MinArea:         16,
 		BaseModelConfig: common.BaseModelConfig{
 			OnnxConfig: common.Config{
-				ModelPath: filepath.Join("./models", "ch_PP-OCRv5_server_det.onnx"),
+				ModelPath: "ch_PP-OCRv5_server_det.onnx",
 			},
 		},
 	}
 }
 
-func (m *Model) Init(configSrc common.ConfigSource) error {
-	cfg, ok := configSrc.GetConfig(m.GetName()).(*ModelConfig)
-	if !ok {
-		cfg = m.GetDefaultConfig().(*ModelConfig)
-	}
-	m.config = cfg
-	inputNames, outputNames, err := common.InputOutputNames(cfg.OnnxConfig.ModelPath, cfg.OnnxConfig.Options)
-	if err != nil {
-		return err
-	}
-	session, err := ort.NewDynamicAdvancedSession(cfg.OnnxConfig.ModelPath,
-		inputNames,
-		outputNames,
-		cfg.OnnxConfig.Options)
-	if err != nil {
-		return err
-	}
-	m.session = session
-	return nil
-}
-
-func (m *Model) Close() error {
-	if m.session != nil {
-		return m.session.Destroy()
-	}
-	return nil
-}
-
 // Detect performs detection and returns ordered boxes in original image space.
 func (m *Model) Detect(img image.Image) ([]utils.Box, error) {
+	config, ok := m.GetDefaultConfig().(*ModelConfig)
+	if !ok {
+		return nil, common.ErrInvalidConfig
+	}
+
 	bounds := img.Bounds()
 	origW := bounds.Max.X - bounds.Min.X
 	origH := bounds.Max.Y - bounds.Min.Y
 
 	// Resize
 	scale := 1.0
-	if origW >= origH && origW > m.config.LimitSideLength {
-		scale = float64(m.config.LimitSideLength) / float64(origW)
-	} else if origH > origW && origH > m.config.LimitSideLength {
-		scale = float64(m.config.LimitSideLength) / float64(origH)
+	if origW >= origH && origW > config.LimitSideLength {
+		scale = float64(config.LimitSideLength) / float64(origW)
+	} else if origH > origW && origH > config.LimitSideLength {
+		scale = float64(config.LimitSideLength) / float64(origH)
 	}
 	resW := int(math.Round(float64(origW) * scale))
 	resH := int(math.Round(float64(origH) * scale))
@@ -113,9 +90,9 @@ func (m *Model) Detect(img image.Image) ([]utils.Box, error) {
 
 	// Build NCHW float32 tensor (padded area filled with normalised zero).
 	data := make([]float32, 3*padH*padW)
-	zeroR := float32((0 - m.config.Mean[0]) / m.config.Std[0])
-	zeroG := float32((0 - m.config.Mean[1]) / m.config.Std[1])
-	zeroB := float32((0 - m.config.Mean[2]) / m.config.Std[2])
+	zeroR := (0 - config.Mean[0]) / config.Std[0]
+	zeroG := (0 - config.Mean[1]) / config.Std[1]
+	zeroB := (0 - config.Mean[2]) / config.Std[2]
 	// Fill padding with normalised 0.
 	for c := 0; c < 3; c++ {
 		var zv float32
@@ -154,9 +131,9 @@ func (m *Model) Detect(img image.Image) ([]utils.Box, error) {
 			gv := float32(g32) / 65535.0
 			bv := float32(b32) / 65535.0
 			idx := py*padW + px
-			data[0*padH*padW+idx] = float32((rv - m.config.Mean[0]) / m.config.Std[0])
-			data[1*padH*padW+idx] = float32((gv - m.config.Mean[1]) / m.config.Std[1])
-			data[2*padH*padW+idx] = float32((bv - m.config.Mean[2]) / m.config.Std[2])
+			data[0*padH*padW+idx] = (rv - config.Mean[0]) / config.Std[0]
+			data[1*padH*padW+idx] = (gv - config.Mean[1]) / config.Std[1]
+			data[2*padH*padW+idx] = (bv - config.Mean[2]) / config.Std[2]
 		}
 	}
 
@@ -171,7 +148,7 @@ func (m *Model) Detect(img image.Image) ([]utils.Box, error) {
 	}()
 
 	outputs := make([]ort.Value, 1)
-	if err := m.session.Run([]ort.Value{inTensor}, outputs); err != nil {
+	if err := m.GetSession().Run([]ort.Value{inTensor}, outputs); err != nil {
 		return nil, fmt.Errorf("det inference: %w", err)
 	}
 	outTensor, ok := outputs[0].(*ort.Tensor[float32])
@@ -186,7 +163,7 @@ func (m *Model) Detect(img image.Image) ([]utils.Box, error) {
 	probData := outTensor.GetData() // (1,1,padH,padW) flattened
 
 	// Postprocess
-	boxes := m.postprocess(probData, padH, padW, resH, resW, origH, origW)
+	boxes := m.postprocess(config, probData, padH, padW, resH, resW, origH, origW)
 	return boxes, nil
 }
 
@@ -194,14 +171,16 @@ func (m *Model) Detect(img image.Image) ([]utils.Box, error) {
 // Postprocessing
 // ---------------------------------------------------------------------------
 
-func (m *Model) postprocess(probData []float32, padH, padW, resH, resW, origH, origW int) []utils.Box {
+func (m *Model) postprocess(
+	config *ModelConfig, probData []float32, padH, padW, resH, resW, origH, origW int,
+) []utils.Box {
 	// Build binary mask.
 	mask := make([]bool, padH*padW)
 	for i, v := range probData {
 		if i >= padH*padW {
 			break
 		}
-		mask[i] = v > m.config.Thresh
+		mask[i] = v > config.Thresh
 	}
 
 	// Connected components.
@@ -214,7 +193,7 @@ func (m *Model) postprocess(probData []float32, padH, padW, resH, resW, origH, o
 	var boxes []utils.Box
 
 	for _, comp := range components {
-		if len(comp) < m.config.MinArea {
+		if len(comp) < config.MinArea {
 			continue
 		}
 
@@ -239,12 +218,12 @@ func (m *Model) postprocess(probData []float32, padH, padW, resH, resW, origH, o
 		}
 
 		// Box score is computed on the pre-unclip rectangle (matches PaddleOCR).
-		if boxScore(probData, padW, rectPoly) < m.config.BoxThresh {
+		if boxScore(probData, padW, rectPoly) < config.BoxThresh {
 			continue
 		}
 
 		// Expand polygon, then get the min-area rect of the expanded shape.
-		unclipped := unclipPoly(rectPoly, m.config.UnclipRatio)
+		unclipped := unclipPoly(rectPoly, config.UnclipRatio)
 		if len(unclipped) < 4 {
 			continue
 		}

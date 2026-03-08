@@ -69,7 +69,7 @@ func (m *Model) RecognizeLineOnly() bool {
 }
 
 // Recognize crops the quad region and sends it to the OpenAI-compatible API for recognition.
-func (m *Model) Recognize(img image.Image, quad [4][2]int) (recognize.Result, error) {
+func (m *Model) Recognize(img image.Image, quad [4][2]int) (*recognize.Result, error) {
 	ordered := utils.OrderPoints4(utils.FloatQuad(quad))
 
 	// Determine crop dimensions.
@@ -91,7 +91,7 @@ func (m *Model) Recognize(img image.Image, quad [4][2]int) (recognize.Result, er
 	// Encode as base64 PNG.
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, crop); err != nil {
-		return recognize.Result{}, fmt.Errorf("openai recognizer: encode image: %w", err)
+		return nil, fmt.Errorf("openai recognizer: encode image: %w", err)
 	}
 	b64 := base64.StdEncoding.EncodeToString(buf.Bytes())
 	dataURL := "data:image/png;base64," + b64
@@ -124,13 +124,13 @@ func (m *Model) Recognize(img image.Image, quad [4][2]int) (recognize.Result, er
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
-		return recognize.Result{}, fmt.Errorf("openai recognizer: marshal request: %w", err)
+		return nil, fmt.Errorf("openai recognizer: marshal request: %w", err)
 	}
 
 	url := m.config.Endpoint + "/chat/completions"
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(bodyBytes))
 	if err != nil {
-		return recognize.Result{}, fmt.Errorf("openai recognizer: create request: %w", err)
+		return nil, fmt.Errorf("openai recognizer: create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if m.config.APIKey != "" {
@@ -139,16 +139,16 @@ func (m *Model) Recognize(img image.Image, quad [4][2]int) (recognize.Result, er
 
 	resp, err := m.client.Do(req)
 	if err != nil {
-		return recognize.Result{}, fmt.Errorf("openai recognizer: http request: %w", err)
+		return nil, fmt.Errorf("openai recognizer: http request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return recognize.Result{}, fmt.Errorf("openai recognizer: read response: %w", err)
+		return nil, fmt.Errorf("openai recognizer: read response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return recognize.Result{}, fmt.Errorf("openai recognizer: API returned %d: %s", resp.StatusCode, respBytes)
+		return nil, fmt.Errorf("openai recognizer: API returned %d: %s", resp.StatusCode, respBytes)
 	}
 
 	// Parse choices[0].message.content.
@@ -160,14 +160,14 @@ func (m *Model) Recognize(img image.Image, quad [4][2]int) (recognize.Result, er
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(respBytes, &result); err != nil {
-		return recognize.Result{}, fmt.Errorf("openai recognizer: parse response: %w", err)
+		return nil, fmt.Errorf("openai recognizer: parse response: %w", err)
 	}
 	if len(result.Choices) == 0 {
-		return recognize.Result{}, fmt.Errorf("openai recognizer: no choices in response")
+		return nil, fmt.Errorf("openai recognizer: no choices in response")
 	}
 
 	text := result.Choices[0].Message.Content
-	return recognize.Result{Text: text, Score: 1.0}, nil
+	return &recognize.Result{Text: text, Score: 1.0}, nil
 }
 
 func max64(a, b float64) float64 {

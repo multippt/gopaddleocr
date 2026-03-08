@@ -3,7 +3,6 @@ package ppdoclayoutv3
 import (
 	"fmt"
 	"image"
-	"path/filepath"
 	"sort"
 
 	"github.com/multippt/gopaddleocr/pkg/ocr/common"
@@ -16,6 +15,8 @@ const ModelName = "pp-doclayoutv3"
 type ModelConfig struct {
 	InputSize      int     // default 800
 	ScoreThreshold float32 // default 0.3
+	Mean [3]float32
+	Std  [3]float32
 	common.BaseModelConfig
 }
 
@@ -24,12 +25,13 @@ type ModelConfig struct {
 // ---------------------------------------------------------------------------
 
 type Model struct {
-	session *ort.DynamicAdvancedSession
-	config  *ModelConfig
+	*common.OnnxModel
 }
 
 func NewModel() *Model {
-	return &Model{}
+	m := &Model{}
+	m.OnnxModel = common.NewOnnxModel(m)
+	return m
 }
 
 func (m *Model) GetName() string { return ModelName }
@@ -38,45 +40,23 @@ func (m *Model) GetDefaultConfig() common.ModelConfig {
 	return &ModelConfig{
 		InputSize:      800,
 		ScoreThreshold: 0.3,
+		Mean: [3]float32{0.485, 0.456, 0.406},
+		Std:  [3]float32{0.229, 0.224, 0.225},
 		BaseModelConfig: common.BaseModelConfig{
 			OnnxConfig: common.Config{
-				ModelPath: filepath.Join("./models", "PP-DocLayoutV3.onnx"),
+				ModelPath: "PP-DocLayoutV3.onnx",
 			},
 		},
 	}
 }
 
-func (m *Model) Init(configSrc common.ConfigSource) error {
-	cfg, ok := configSrc.GetConfig(m.GetName()).(*ModelConfig)
-	if !ok {
-		cfg = m.GetDefaultConfig().(*ModelConfig)
-	}
-	m.config = cfg
-	inputNames, outputNames, err := common.InputOutputNames(cfg.OnnxConfig.ModelPath, cfg.OnnxConfig.Options)
-	if err != nil {
-		return err
-	}
-	session, err := ort.NewDynamicAdvancedSession(cfg.OnnxConfig.ModelPath,
-		inputNames,
-		outputNames,
-		cfg.OnnxConfig.Options)
-	if err != nil {
-		return err
-	}
-	m.config = cfg
-	m.session = session
-	return nil
-}
-
-func (m *Model) Close() error {
-	if m.session != nil {
-		return m.session.Destroy()
-	}
-	return nil
-}
-
 // Detect runs PP-DocLayoutV3 and returns layout boxes sorted by reading order.
 func (m *Model) Detect(img image.Image) ([]utils.Box, error) {
+	config, ok := m.GetDefaultConfig().(*ModelConfig)
+	if !ok {
+		return nil, common.ErrInvalidConfig
+	}
+
 	bounds := img.Bounds()
 	origW := bounds.Max.X - bounds.Min.X
 	origH := bounds.Max.Y - bounds.Min.Y
@@ -84,17 +64,12 @@ func (m *Model) Detect(img image.Image) ([]utils.Box, error) {
 		return nil, nil
 	}
 
-	size := m.config.InputSize
+	size := config.InputSize
 	scaleH := float32(size) / float32(origH)
 	scaleW := float32(size) / float32(origW)
 
-	// Resize to size×size (non-aspect-preserving) and normalize with ImageNet stats.
+	// Resize to size×size (non-aspect-preserving) and normalize with config mean/std.
 	resized := utils.BilinearResize(img, size, size)
-
-	const (
-		meanR, meanG, meanB = float32(0.485), float32(0.456), float32(0.406)
-		stdR, stdG, stdB    = float32(0.229), float32(0.224), float32(0.225)
-	)
 
 	imageData := make([]float32, 3*size*size)
 	for y := 0; y < size; y++ {
@@ -104,9 +79,9 @@ func (m *Model) Detect(img image.Image) ([]utils.Box, error) {
 			gv := float32(pix.G) / 255.0
 			bv := float32(pix.B) / 255.0
 			idx := y*size + x
-			imageData[0*size*size+idx] = (rv - meanR) / stdR
-			imageData[1*size*size+idx] = (gv - meanG) / stdG
-			imageData[2*size*size+idx] = (bv - meanB) / stdB
+			imageData[0*size*size+idx] = (rv - config.Mean[0]) / config.Std[0]
+			imageData[1*size*size+idx] = (gv - config.Mean[1]) / config.Std[1]
+			imageData[2*size*size+idx] = (bv - config.Mean[2]) / config.Std[2]
 		}
 	}
 
@@ -132,7 +107,7 @@ func (m *Model) Detect(img image.Image) ([]utils.Box, error) {
 	defer func() { _ = scaleTensor.Destroy() }()
 
 	outputs := make([]ort.Value, 3)
-	if err := m.session.Run([]ort.Value{imShapeTensor, imageTensor, scaleTensor}, outputs); err != nil {
+	if err := m.GetSession().Run([]ort.Value{imShapeTensor, imageTensor, scaleTensor}, outputs); err != nil {
 		return nil, fmt.Errorf("ppdoclayoutv3 inference: %w", err)
 	}
 	// outputs[1] and outputs[2] are unused auxiliary outputs.
@@ -157,12 +132,14 @@ func (m *Model) Detect(img image.Image) ([]utils.Box, error) {
 	}
 	N := int(outShape[0])
 
-	return m.postprocess(raw, N, origW, origH), nil
+	return m.postprocess(config, raw, N, origW, origH), nil
 }
 
 // postprocess converts raw ONNX output (N×7 flat float32) into sorted, clamped Box values.
 // Each row is [label_id, score, xmin, ymin, xmax, ymax, read_order].
-func (m *Model) postprocess(raw []float32, N, origW, origH int) []utils.Box {
+func (m *Model) postprocess(
+	config *ModelConfig, raw []float32, N, origW, origH int,
+) []utils.Box {
 	type rawBox struct {
 		classID                int
 		score                  float64
@@ -173,7 +150,7 @@ func (m *Model) postprocess(raw []float32, N, origW, origH int) []utils.Box {
 	for i := 0; i < N; i++ {
 		row := raw[i*7 : i*7+7]
 		score := float64(row[1])
-		if float32(score) < m.config.ScoreThreshold {
+		if float32(score) < config.ScoreThreshold {
 			continue
 		}
 		candidates = append(candidates, rawBox{

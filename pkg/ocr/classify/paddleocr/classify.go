@@ -3,7 +3,6 @@ package paddleocr
 import (
 	"fmt"
 	"image"
-	"path/filepath"
 
 	"github.com/multippt/gopaddleocr/pkg/ocr/common"
 	"github.com/multippt/gopaddleocr/pkg/ocr/utils"
@@ -27,12 +26,13 @@ type ModelConfig struct {
 // ---------------------------------------------------------------------------
 
 type Model struct {
-	session *ort.DynamicAdvancedSession
-	config  *ModelConfig
+	*common.OnnxModel
 }
 
 func NewModel() *Model {
-	return &Model{}
+	m := &Model{}
+	m.OnnxModel = common.NewOnnxModel(m)
+	return m
 }
 
 func (m *Model) GetName() string { return ModelName }
@@ -46,46 +46,23 @@ func (m *Model) GetDefaultConfig() common.ModelConfig {
 		Std:       [3]float64{0.5, 0.5, 0.5},
 		BaseModelConfig: common.BaseModelConfig{
 			OnnxConfig: common.Config{
-				ModelPath: filepath.Join("./models", "ch_ppocr_mobile_v2.0_cls_infer.onnx"),
+				ModelPath: "ch_ppocr_mobile_v2.0_cls_infer.onnx",
 			},
 		},
 	}
 }
 
-func (m *Model) Init(configSrc common.ConfigSource) error {
-	cfg, ok := configSrc.GetConfig(m.GetName()).(*ModelConfig)
-	if !ok {
-		cfg = m.GetDefaultConfig().(*ModelConfig)
-	}
-	m.config = cfg
-	inputNames, outputNames, err := common.InputOutputNames(cfg.OnnxConfig.ModelPath, cfg.OnnxConfig.Options)
-	if err != nil {
-		return err
-	}
-	session, err := ort.NewDynamicAdvancedSession(cfg.OnnxConfig.ModelPath,
-		inputNames,
-		outputNames,
-		cfg.OnnxConfig.Options)
-	if err != nil {
-		return err
-	}
-	m.session = session
-	return nil
-}
-
-func (m *Model) Close() error {
-	if m.session != nil {
-		return m.session.Destroy()
-	}
-	return nil
-}
-
 // Classify returns true if the crop needs 180° rotation.
 func (m *Model) Classify(img image.Image, quad [4][2]int) (bool, error) {
-	crop := utils.PerspectiveWarp(img, utils.FloatQuad(quad), m.config.Width, m.config.Height)
-	data := utils.ImageToNCHW(crop, m.config.Height, m.config.Width, m.config.Mean, m.config.Std)
+	config, ok := m.GetDefaultConfig().(*ModelConfig)
+	if !ok {
+		return false, common.ErrInvalidConfig
+	}
 
-	shape := ort.NewShape(1, 3, int64(m.config.Height), int64(m.config.Width))
+	crop := utils.PerspectiveWarp(img, utils.FloatQuad(quad), config.Width, config.Height)
+	data := utils.ImageToNCHW(crop, config.Height, config.Width, config.Mean, config.Std)
+
+	shape := ort.NewShape(1, 3, int64(config.Height), int64(config.Width))
 	inTensor, err := ort.NewTensor(shape, data)
 	if err != nil {
 		return false, fmt.Errorf("cls input tensor: %w", err)
@@ -95,7 +72,7 @@ func (m *Model) Classify(img image.Image, quad [4][2]int) (bool, error) {
 	}()
 
 	outputs := make([]ort.Value, 1)
-	if err := m.session.Run([]ort.Value{inTensor}, outputs); err != nil {
+	if err := m.GetSession().Run([]ort.Value{inTensor}, outputs); err != nil {
 		return false, fmt.Errorf("cls inference: %w", err)
 	}
 	outTensor, ok := outputs[0].(*ort.Tensor[float32])
@@ -112,5 +89,5 @@ func (m *Model) Classify(img image.Image, quad [4][2]int) (bool, error) {
 	if len(logits) < 2 {
 		return false, nil
 	}
-	return logits[1] > logits[0] && logits[1] > m.config.Threshold, nil
+	return logits[1] > logits[0] && logits[1] > config.Threshold, nil
 }
