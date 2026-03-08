@@ -83,10 +83,6 @@ func (m *Model) Close() error {
 // Classify returns true if the crop needs 180° rotation.
 func (m *Model) Classify(img image.Image, quad [4][2]int) (bool, error) {
 	crop := utils.PerspectiveWarp(img, utils.FloatQuad(quad), m.config.Width, m.config.Height)
-	if crop == nil {
-		return false, nil
-	}
-
 	data := utils.ImageToNCHW(crop, m.config.Height, m.config.Width, m.config.Mean, m.config.Std)
 
 	shape := ort.NewShape(1, 3, int64(m.config.Height), int64(m.config.Width))

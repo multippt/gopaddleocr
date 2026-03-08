@@ -5,11 +5,36 @@ import (
 	"bytes"
 	"math"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
+// testModelPath returns the path to a model file inside the "models"
+// subdirectory of the package source tree.  It resolves the package root by
+// walking up from os.Getwd() until it finds a go.mod, then descending into
+// the known package path.  This works regardless of the CWD set by the IDE.
+func testModelPath(name string) string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return filepath.Join("models", name)
+	}
+	// Walk upward to the module root (directory containing go.mod).
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Reached fs root without finding go.mod; fall back to relative.
+			return filepath.Join("models", name)
+		}
+		dir = parent
+	}
+	return filepath.Join(dir, "models", name)
+}
+
 func TestONNXMetadataExtract(t *testing.T) {
-	const model = "./models/ch_PP-OCRv5_rec_server_infer.onnx"
+	model := testModelPath("ch_PP-OCRv5_rec_server_infer.onnx")
 	if _, err := os.Stat(model); err != nil {
 		t.Skipf("skipping: %s not found", model)
 	}
@@ -28,7 +53,7 @@ func TestONNXMetadataExtract(t *testing.T) {
 }
 
 func TestEnsureCharDictCreatesFile(t *testing.T) {
-	const model = "./models/ch_PP-OCRv5_rec_server_infer.onnx"
+	model := testModelPath("ch_PP-OCRv5_rec_server_infer.onnx")
 	if _, err := os.Stat(model); err != nil {
 		t.Skipf("skipping: %s not found", model)
 	}

@@ -231,8 +231,11 @@ func FloatQuad(q [4][2]int) [4][2]float64 {
 // PerspectiveWarp crops the img quad into a (dstW × dstH) RGBA image.
 // src must be ordered [top-left, top-right, bottom-right, bottom-left].
 func PerspectiveWarp(img image.Image, src [4][2]float64, dstW, dstH int) *image.RGBA {
-	if dstW <= 0 || dstH <= 0 {
-		return nil
+	if dstW <= 0 {
+		dstW = 1
+	}
+	if dstH <= 0 {
+		dstH = 1
 	}
 	// Destination rectangle corners.
 	dst := [4][2]float64{

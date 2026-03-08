@@ -87,9 +87,6 @@ func (m *Model) Recognize(img image.Image, quad [4][2]int) (recognize.Result, er
 	}
 
 	crop := utils.PerspectiveWarp(img, ordered, dstW, dstH)
-	if crop == nil {
-		return recognize.Result{}, fmt.Errorf("openai recognizer: perspective warp returned nil")
-	}
 
 	// Encode as base64 PNG.
 	var buf bytes.Buffer

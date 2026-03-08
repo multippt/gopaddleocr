@@ -120,9 +120,6 @@ func (m *Model) Recognize(img image.Image, quad [4][2]int) (recognize.Result, er
 			targetH = 1
 		}
 		portrait := utils.PerspectiveWarp(img, ordered, m.config.Height, targetH)
-		if portrait == nil {
-			return recognize.Result{}, nil
-		}
 		warpedImg = utils.Rotate90CCW(portrait)
 		targetW = targetH // after rotation, width = former portrait height
 	} else {
@@ -131,9 +128,6 @@ func (m *Model) Recognize(img image.Image, quad [4][2]int) (recognize.Result, er
 			targetW = 1
 		}
 		warpedImg = utils.PerspectiveWarp(img, ordered, targetW, m.config.Height)
-		if warpedImg == nil {
-			return recognize.Result{}, nil
-		}
 	}
 
 	// Build NCHW float32 tensor.

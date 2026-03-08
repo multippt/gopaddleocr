@@ -463,13 +463,13 @@ func TestFloatQuad(t *testing.T) {
 func TestPerspectiveWarp_InvalidDims(t *testing.T) {
 	src := image.NewRGBA(image.Rect(0, 0, 100, 100))
 	quad := [4][2]float64{{10, 10}, {90, 10}, {90, 90}, {10, 90}}
-	if got := PerspectiveWarp(src, quad, 0, 50); got != nil {
-		t.Error("dstW=0 should return nil")
+	if got := PerspectiveWarp(src, quad, 0, 50); got == nil || got.Bounds().Dx() != 1 {
+		t.Error("dstW=0 should return a 1-wide image")
 	}
-	if got := PerspectiveWarp(src, quad, 50, 0); got != nil {
-		t.Error("dstH=0 should return nil")
+	if got := PerspectiveWarp(src, quad, 50, 0); got == nil || got.Bounds().Dy() != 1 {
+		t.Error("dstH=0 should return a 1-tall image")
 	}
-	if got := PerspectiveWarp(src, quad, -1, 50); got != nil {
-		t.Error("dstW<0 should return nil")
+	if got := PerspectiveWarp(src, quad, -1, 50); got == nil || got.Bounds().Dx() != 1 {
+		t.Error("dstW<0 should return a 1-wide image")
 	}
 }
