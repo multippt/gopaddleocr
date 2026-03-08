@@ -626,35 +626,35 @@ func TestComputeTextColor_CJKLikeColoredOnWhite(t *testing.T) {
 	}
 }
 
-func TestComputeTextColor_CJKLikeHighDensityMinorityRule(t *testing.T) {
-	// When the quad covers only glyphs with no margin, there are no
-	// outside-polygon pixels, so minority rule fires.  For dense CJK ink the
-	// dark cluster is the MAJORITY; minority rule would wrongly pick the light
-	// (whitespace) cluster as text.
-	//
-	// This test documents that known limitation: it asserts the current
-	// behaviour and will need updating if the heuristic is improved.
+func TestComputeTextColor_CJKLikeHighDensityNoMargin(t *testing.T) {
+	// The quad is wider than the image so that Fix 1's AABB expansion finds
+	// surrounding white pixels even though the polygon fills the crop.
+	// Fix 2 (variance tiebreaker) handles the residual case where the image
+	// itself has no margin at all.
 	white := color.RGBA{R: 255, G: 255, B: 255, A: 255}
 	black := color.RGBA{R: 0, G: 0, B: 0, A: 255}
 
-	img := newSolidImage(200, 30, white)
-	// Pack glyphs with no margin so the quad exactly wraps the ink.
+	// Image has a 30-px white margin on all sides around the glyph strip.
+	// The quad tightly wraps only the glyphs, so the polygon has no
+	// inside-AABB outside-polygon pixels — Fix 1 must reach into the margin.
+	const margin = 30
+	img := newSolidImage(100+2*margin, 20+2*margin, white)
 	for i := 0; i < 5; i++ {
-		drawCJKGlyph(img, i*20, 0, 20, black)
+		drawCJKGlyph(img, margin+i*20, margin, 20, black)
 	}
 
-	// Quad tightly wraps the glyph strip: no outside pixels → minority rule.
-	quad := [4][2]int{{0, 0}, {99, 0}, {99, 19}, {0, 19}}
-	tc, _, _ := ComputeTextColor(img, quad)
-	// If nil or white-ish is returned, the minority-rule heuristic has been
-	// fooled by dense ink.  Log this as a known algorithmic limitation.
-	if tc == nil {
-		t.Log("KNOWN LIMITATION: dense CJK with no outside pixels → too few pixels or nil")
-		return
+	quad := [4][2]int{
+		{margin, margin},
+		{margin + 99, margin},
+		{margin + 99, margin + 19},
+		{margin, margin + 19},
 	}
-	if tc[0] > 200 && tc[1] > 200 && tc[2] > 200 {
-		t.Logf("KNOWN LIMITATION: minority rule returned white (bg) as text color "+
-			"for high-density CJK-like glyphs: %v", tc)
+	tc, _, _ := ComputeTextColor(img, quad)
+	if tc == nil {
+		t.Fatal("CJK no-margin: expected non-nil TextColor after fixes")
+	}
+	if !colorClose(tc, black, 40) {
+		t.Errorf("CJK no-margin: got %v, want near black ±40 (Fix 1 should resolve this)", tc)
 	}
 }
 

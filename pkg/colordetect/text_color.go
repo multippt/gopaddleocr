@@ -111,10 +111,32 @@ func ComputeTextColor(img image.Image, quad [4][2]int) ([]int, [][]bool, *image.
 		}
 	}
 
+	// Fix 1: when the polygon fills its AABB (no inside-AABB outside-polygon
+	// pixels), expand outward from the AABB into the surrounding image.
+	// This gives a background reference even for tight, axis-aligned quads
+	// such as those produced by dense CJK text regions.
+	const minBgPixels = 20
+	if len(outsidePx) < minBgPixels {
+		const expandBg = 15
+		bgX0 := utils.ClampInt(x0-expandBg, bounds.Min.X, bounds.Max.X)
+		bgY0 := utils.ClampInt(y0-expandBg, bounds.Min.Y, bounds.Max.Y)
+		bgX1 := utils.ClampInt(x1+expandBg, bounds.Min.X, bounds.Max.X)
+		bgY1 := utils.ClampInt(y1+expandBg, bounds.Min.Y, bounds.Max.Y)
+		for py := bgY0; py < bgY1; py++ {
+			for px := bgX0; px < bgX1; px++ {
+				if px >= x0 && px < x1 && py >= y0 && py < y1 {
+					continue // skip the original AABB
+				}
+				r32, g32, b32, a32 := img.At(px, py).RGBA()
+				pix := utils.ColorRGBA(r32, g32, b32, a32)
+				outsidePx = append(outsidePx, [3]uint8{pix.R, pix.G, pix.B})
+			}
+		}
+	}
+
 	var textPx [][3]uint8
 	var fgFlat []bool
 
-	const minBgPixels = 20
 	if len(outsidePx) >= minBgPixels {
 		bgMedian := medianRGB(outsidePx)
 		darkMedian := medianRGB(darkPx)
@@ -129,8 +151,11 @@ func ComputeTextColor(img image.Image, quad [4][2]int) ([]int, [][]bool, *image.
 			fgFlat = darkMaskFlat
 		}
 	} else {
-		// Strategy 2 — minority rule.
-		if len(darkPx) <= len(lightPx) {
+		// Fix 2: variance-guided fallback when no background reference is
+		// available (image cropped to exactly the text box with no margin).
+		// The more uniform cluster is the background; text pixels have higher
+		// variance due to stroke edges and anti-aliasing.
+		if clusterVariance(lightPx) <= clusterVariance(darkPx) {
 			textPx = darkPx
 			fgFlat = darkMaskFlat
 		} else {
@@ -433,6 +458,33 @@ func mergeSimilarColorSpans(wcs []WordColorEntry) []WordColorEntry {
 // ---------------------------------------------------------------------------
 // Color utility helpers
 // ---------------------------------------------------------------------------
+
+// clusterVariance returns the mean squared distance of each pixel from the
+// per-channel mean — a measure of colour uniformity within the cluster.
+// A near-zero value means the cluster is a single uniform colour (typical
+// for a solid background); a high value indicates mixed colours (typical
+// for text with stroke edges or anti-aliasing).
+func clusterVariance(px [][3]uint8) float64 {
+	if len(px) == 0 {
+		return 0
+	}
+	var sumR, sumG, sumB float64
+	for _, p := range px {
+		sumR += float64(p[0])
+		sumG += float64(p[1])
+		sumB += float64(p[2])
+	}
+	n := float64(len(px))
+	mR, mG, mB := sumR/n, sumG/n, sumB/n
+	var v float64
+	for _, p := range px {
+		dR := float64(p[0]) - mR
+		dG := float64(p[1]) - mG
+		dB := float64(p[2]) - mB
+		v += dR*dR + dG*dG + dB*dB
+	}
+	return v / n
+}
 
 func colorDistSq(a, b [3]uint8) float64 {
 	dr := float64(a[0]) - float64(b[0])

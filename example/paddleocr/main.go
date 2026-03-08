@@ -29,12 +29,11 @@ func main() {
 		ocr.WithWorkflowType("PaddleOCR"), // or "GLM-OCR"
 		ocr.WithBoxMerge(true),
 	)
-	defer engine.Close()
-
 	if err := engine.Init(); err != nil {
 		fmt.Printf("%v\n", err)
 		return
 	}
+	defer engine.Close()
 
 	results, err := engine.RunOCR(data)
 	if err != nil {

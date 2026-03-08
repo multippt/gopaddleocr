@@ -67,8 +67,6 @@ package main
 
 import (
 	"fmt"
-	_ "image/jpeg"
-	_ "image/png"
 	"io"
 	"net/http"
 
@@ -93,12 +91,11 @@ func main() {
 	}
 
 	engine := ocr.NewEngine()
-	defer engine.Close()
-
 	if err := engine.Init(); err != nil {
 		fmt.Printf("%v\n", err)
 		return
 	}
+	defer engine.Close()
 
 	results, err := engine.RunOCR(data)
 	if err != nil {
