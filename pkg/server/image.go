@@ -2,21 +2,21 @@ package server
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"image"
 	"io"
+	"net/http"
 	"strings"
 
-	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
-	_ "golang.org/x/image/webp"
 )
 
 // ---------------------------------------------------------------------------
 // Helper: parse image bytes from multipart or JSON request
 // ---------------------------------------------------------------------------
 
-func (s *Server) parseImage(c *gin.Context) (image.Image, error) {
-	data, err := s.parseImageBytes(c)
+func (s *Server) parseImage(r *http.Request) (image.Image, error) {
+	data, err := s.parseImageBytes(r)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot parse image")
 	}
@@ -30,11 +30,11 @@ func (s *Server) parseImage(c *gin.Context) (image.Image, error) {
 	return img, nil
 }
 
-func (s *Server) parseImageBytes(c *gin.Context) ([]byte, error) {
-	ct := c.GetHeader("Content-Type")
+func (s *Server) parseImageBytes(r *http.Request) ([]byte, error) {
+	ct := r.Header.Get("Content-Type")
 	switch {
 	case strings.Contains(ct, "multipart/form-data"):
-		f, _, err := c.Request.FormFile("image")
+		f, _, err := r.FormFile("image")
 		if err != nil {
 			return nil, err
 		}
@@ -47,7 +47,7 @@ func (s *Server) parseImageBytes(c *gin.Context) ([]byte, error) {
 		var body struct {
 			Image string `json:"image"`
 		}
-		if err := c.ShouldBindJSON(&body); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			return nil, err
 		}
 		// Accept both standard and URL-safe base64

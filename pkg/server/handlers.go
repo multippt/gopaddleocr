@@ -1,102 +1,108 @@
 package server
 
 import (
+	"encoding/json"
 	"image"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/multippt/gopaddleocr/pkg/colordetect"
 	"github.com/multippt/gopaddleocr/pkg/ocr"
 	"github.com/multippt/gopaddleocr/pkg/ocr/utils"
 )
 
-func (s *Server) handleHealth(c *gin.Context) {
-	if s.ocrEngine == nil || !s.ocrEngine.IsReady() {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"detail": "ocr engine not ready"})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
 }
 
-func (s *Server) handleOCR(c *gin.Context) {
-	img, err := s.parseImage(c)
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if s.ocrEngine == nil || !s.ocrEngine.IsReady() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"detail": "ocr engine not ready"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleOCR(w http.ResponseWriter, r *http.Request) {
+	img, err := s.parseImage(r)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "invalid or missing image"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"detail": "invalid or missing image"})
 		return
 	}
 
 	t0 := time.Now()
 	results, err := s.ocrEngine.ImageRunOCR(img)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"detail": err.Error()})
 		return
 	}
 	elapsed := float64(time.Since(t0).Microseconds()) / 1000.0
 
 	lines, texts := buildOCRLines(img, results)
-	c.JSON(http.StatusOK, OCRResponse{
+	writeJSON(w, http.StatusOK, OCRResponse{
 		Results:   lines,
 		FullText:  strings.Join(texts, "\n"),
 		ElapsedMs: elapsed,
 	})
 }
 
-func (s *Server) handleDetect(c *gin.Context) {
-	img, err := s.parseImage(c)
+func (s *Server) handleDetect(w http.ResponseWriter, r *http.Request) {
+	img, err := s.parseImage(r)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "invalid or missing image"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"detail": "invalid or missing image"})
 		return
 	}
 
-	s.doImageDetect(c, img)
+	s.doImageDetect(w, r, img)
 }
 
-func (s *Server) handleSessionCreate(c *gin.Context) {
-	img, err := s.parseImage(c)
+func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
+	img, err := s.parseImage(r)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "invalid or missing image"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"detail": "invalid or missing image"})
 		return
 	}
 
 	// Honour optional existing session_id from form or JSON.
-	sid := c.PostForm("session_id")
+	sid := r.FormValue("session_id")
 	if sid == "" {
 		sid = s.sessionManager.NewID()
 	}
 	s.sessionManager.Store(sid, img)
-	c.JSON(http.StatusOK, SessionResponse{SessionID: sid})
+	writeJSON(w, http.StatusOK, SessionResponse{SessionID: sid})
 }
 
-func (s *Server) handleSessionDelete(c *gin.Context) {
-	sid := c.PostForm("session_id")
+func (s *Server) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
+	sid := r.FormValue("session_id")
 	s.sessionManager.Delete(sid)
-	c.JSON(http.StatusOK, SessionResponse{SessionID: sid})
+	writeJSON(w, http.StatusOK, SessionResponse{SessionID: sid})
 }
 
-func (s *Server) handleSessionDetect(c *gin.Context) {
+func (s *Server) handleSessionDetect(w http.ResponseWriter, r *http.Request) {
 	var req SessionReq
-	if err := c.ShouldBindJSON(&req); err != nil || req.SessionID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "missing session_id"})
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.SessionID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"detail": "missing session_id"})
 		return
 	}
 
 	img, err := s.sessionManager.Get(req.SessionID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"detail": err.Error()})
+		writeJSON(w, http.StatusNotFound, map[string]string{"detail": err.Error()})
 		return
 	}
 
-	s.doImageDetect(c, img)
+	s.doImageDetect(w, r, img)
 }
 
-func (s *Server) doImageDetect(c *gin.Context, img image.Image) {
+func (s *Server) doImageDetect(w http.ResponseWriter, r *http.Request, img image.Image) {
 	t0 := time.Now()
 	detBoxes, err := s.ocrEngine.ImageDetectBoundingBoxes(img)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"detail": err.Error()})
 		return
 	}
 	elapsed := float64(time.Since(t0).Microseconds()) / 1000.0
@@ -106,30 +112,30 @@ func (s *Server) doImageDetect(c *gin.Context, img image.Image) {
 		q := b.Quad
 		boxes[i] = [][2]int{q[0], q[1], q[2], q[3]}
 	}
-	c.JSON(http.StatusOK, DetectResponse{Boxes: boxes, ElapsedMs: elapsed})
+	writeJSON(w, http.StatusOK, DetectResponse{Boxes: boxes, ElapsedMs: elapsed})
 }
 
 const cropPadding = 10
 
-func (s *Server) handleSessionOCR(c *gin.Context) {
+func (s *Server) handleSessionOCR(w http.ResponseWriter, r *http.Request) {
 	var req SessionOCRReq
-	if err := c.ShouldBindJSON(&req); err != nil || req.SessionID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "missing session_id"})
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.SessionID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"detail": "missing session_id"})
 		return
 	}
 
 	img, err := s.sessionManager.Get(req.SessionID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"detail": err.Error()})
+		writeJSON(w, http.StatusNotFound, map[string]string{"detail": err.Error()})
 		return
 	}
 
 	t0 := time.Now()
 
 	if len(req.BoundingBoxes) > 0 {
-		c.JSON(http.StatusOK, s.runSessionOCRWithBoxes(img, req, t0))
+		writeJSON(w, http.StatusOK, s.runSessionOCRWithBoxes(img, req, t0))
 	} else {
-		c.JSON(http.StatusOK, s.runSessionOCRFull(img, t0))
+		writeJSON(w, http.StatusOK, s.runSessionOCRFull(img, t0))
 	}
 }
 
