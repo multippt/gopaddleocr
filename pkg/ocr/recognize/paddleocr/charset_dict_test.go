@@ -67,6 +67,40 @@ func TestEnsureCharDictCreatesFile(t *testing.T) {
 // CharsetDict model-free tests
 // ---------------------------------------------------------------------------
 
+func TestCharsetDictDecode_ShortLogits(t *testing.T) {
+	d := &CharsetDict{entries: []string{"", "A", "B"}}
+	// T=3, numClasses=3 requires 9 floats; provide only 5 → must return ("", 0) not panic.
+	logits := make([]float32, 5)
+	text, score := d.Decode(logits, 3, 3)
+	if text != "" || score != 0 {
+		t.Errorf("short logits: got (%q, %f), want (\"\", 0)", text, score)
+	}
+}
+
+func TestCharsetDictEnsure_ExistingFile(t *testing.T) {
+	// Write a real temp dict file so that Ensure finds it and returns early
+	// without attempting to open the (nonexistent) model file.
+	tmp, err := os.CreateTemp(t.TempDir(), "dict*.txt")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	tmp.Close()
+
+	d := &CharsetDict{}
+	err = d.Ensure("/nonexistent/model.onnx", tmp.Name())
+	if err != nil {
+		t.Errorf("Ensure with existing dict returned error: %v", err)
+	}
+}
+
+func TestCharsetDictLoad_MissingFile(t *testing.T) {
+	d := &CharsetDict{}
+	err := d.Load("/nonexistent/dict.txt")
+	if err == nil {
+		t.Error("Load of missing file should return non-nil error")
+	}
+}
+
 func TestCharsetDictLoad_FromTempFile(t *testing.T) {
 	tmp, err := os.CreateTemp(t.TempDir(), "dict*.txt")
 	if err != nil {

@@ -66,6 +66,25 @@ func TestRecClose_NoInit(t *testing.T) {
 	}
 }
 
+func TestRecognizePreprocess_NormalizationValues(t *testing.T) {
+	cfg := NewModel().GetDefaultConfig().(*ModelConfig)
+	// Solid grey (128,128,128) 4×4 image.
+	img := image.NewRGBA(image.Rect(0, 0, 4, 4))
+	for y := 0; y < 4; y++ {
+		for x := 0; x < 4; x++ {
+			img.SetRGBA(x, y, color.RGBA{R: 128, G: 128, B: 128, A: 255})
+		}
+	}
+	// Expected per-channel: (128/255 - 0.5) / 0.5 ≈ 0.004
+	data := utils.ImageToNCHW(img, 4, 4, cfg.Mean, cfg.Std)
+	for i, v := range data {
+		if math.Abs(float64(v)-0.004) > 0.01 {
+			t.Errorf("data[%d]=%f, want ≈0.004 (grey pixel normalization)", i, v)
+			break
+		}
+	}
+}
+
 func TestRecognizePreprocess_Horizontal(t *testing.T) {
 	cfg := NewModel().GetDefaultConfig().(*ModelConfig)
 

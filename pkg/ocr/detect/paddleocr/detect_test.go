@@ -24,6 +24,70 @@ var testDetConfig = &ModelConfig{
 // unclipPoly tests
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Inline preprocessing logic regression tests
+// ---------------------------------------------------------------------------
+
+func TestDetPreprocess_ScaleLogic(t *testing.T) {
+	limit := testDetConfig.LimitSideLength // 1280
+	scale := func(origW, origH int) float64 {
+		s := 1.0
+		if origW >= origH && origW > limit {
+			s = float64(limit) / float64(origW)
+		} else if origH > origW && origH > limit {
+			s = float64(limit) / float64(origH)
+		}
+		return s
+	}
+
+	cases := []struct {
+		w, h    int
+		wantOne bool // scale == 1.0
+	}{
+		{2000, 100, false},  // landscape needs resize
+		{100, 2000, false},  // portrait needs resize
+		{800, 600, true},    // within limit
+		{1280, 1280, true},  // exactly at limit (not strictly >)
+		{1281, 1000, false}, // one pixel over landscape
+	}
+	for _, tc := range cases {
+		s := scale(tc.w, tc.h)
+		if tc.wantOne && s != 1.0 {
+			t.Errorf("scale(%d,%d)=%f, want 1.0", tc.w, tc.h, s)
+		}
+		if !tc.wantOne && s == 1.0 {
+			t.Errorf("scale(%d,%d)=1.0, want <1.0", tc.w, tc.h)
+		}
+	}
+}
+
+func TestDetPreprocess_PadToMultipleOf32(t *testing.T) {
+	pad := func(in int) int { return ((in + 31) / 32) * 32 }
+	cases := [][2]int{{32, 32}, {33, 64}, {64, 64}, {65, 96}, {1, 32}, {100, 128}}
+	for _, tc := range cases {
+		if got := pad(tc[0]); got != tc[1] {
+			t.Errorf("pad(%d)=%d, want %d", tc[0], got, tc[1])
+		}
+	}
+}
+
+func TestDetPreprocess_ZeroNormalizationValues(t *testing.T) {
+	cfg := testDetConfig
+	zeroR := (0 - cfg.Mean[0]) / cfg.Std[0]
+	zeroG := (0 - cfg.Mean[1]) / cfg.Std[1]
+	zeroB := (0 - cfg.Mean[2]) / cfg.Std[2]
+
+	if math.Abs(float64(zeroR)-(-2.118)) > 0.01 {
+		t.Errorf("zeroR=%f, want ≈-2.118", zeroR)
+	}
+	if math.Abs(float64(zeroG)-(-2.036)) > 0.01 {
+		t.Errorf("zeroG=%f, want ≈-2.036", zeroG)
+	}
+	if math.Abs(float64(zeroB)-(-1.804)) > 0.01 {
+		t.Errorf("zeroB=%f, want ≈-1.804", zeroB)
+	}
+}
+
 func TestUnclipPolyExpands(t *testing.T) {
 	// A simple 10×4 axis-aligned rectangle (CW in image coords: TL→TR→BR→BL).
 	poly := [][2]float64{

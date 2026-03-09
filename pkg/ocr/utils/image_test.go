@@ -460,6 +460,104 @@ func TestFloatQuad(t *testing.T) {
 // PerspectiveWarp edge cases
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// PerspectiveWarp pixel-level tests
+// ---------------------------------------------------------------------------
+
+func TestPerspectiveWarp_AxisAligned_PixelValues(t *testing.T) {
+	// 10×4 image with R=x*20, G=y*50.
+	src := image.NewRGBA(image.Rect(0, 0, 10, 4))
+	for y := 0; y < 4; y++ {
+		for x := 0; x < 10; x++ {
+			src.SetRGBA(x, y, color.RGBA{R: uint8(x * 20), G: uint8(y * 50), A: 255})
+		}
+	}
+	// Axis-aligned quad covering the entire image.
+	quad := [4][2]float64{{0, 0}, {9, 0}, {9, 3}, {0, 3}}
+	out := PerspectiveWarp(src, quad, 10, 4)
+	if out == nil {
+		t.Fatal("PerspectiveWarp returned nil")
+	}
+	b := out.Bounds()
+	if b.Dx() != 10 || b.Dy() != 4 {
+		t.Fatalf("expected 10×4, got %d×%d", b.Dx(), b.Dy())
+	}
+	// Corner (0,0): R≈0, G≈0.
+	c00 := out.RGBAAt(0, 0)
+	if math.Abs(float64(c00.R)-0) > 2 || math.Abs(float64(c00.G)-0) > 2 {
+		t.Errorf("(0,0): got R=%d G=%d, want R≈0 G≈0", c00.R, c00.G)
+	}
+	// Corner (9,0): R≈180, G≈0.
+	c90 := out.RGBAAt(9, 0)
+	if math.Abs(float64(c90.R)-180) > 2 || math.Abs(float64(c90.G)-0) > 2 {
+		t.Errorf("(9,0): got R=%d G=%d, want R≈180 G≈0", c90.R, c90.G)
+	}
+	// Corner (0,3): R≈0, G≈150.
+	c03 := out.RGBAAt(0, 3)
+	if math.Abs(float64(c03.R)-0) > 2 || math.Abs(float64(c03.G)-150) > 2 {
+		t.Errorf("(0,3): got R=%d G=%d, want R≈0 G≈150", c03.R, c03.G)
+	}
+}
+
+func TestPerspectiveWarp_TrapezoidalQuad(t *testing.T) {
+	// 100×100 solid green image.
+	src := image.NewRGBA(image.Rect(0, 0, 100, 100))
+	for y := 0; y < 100; y++ {
+		for x := 0; x < 100; x++ {
+			src.SetRGBA(x, y, color.RGBA{R: 0, G: 200, B: 0, A: 255})
+		}
+	}
+	quad := [4][2]float64{{10, 10}, {80, 20}, {75, 70}, {15, 65}}
+	out := PerspectiveWarp(src, quad, 60, 50)
+	if out == nil {
+		t.Fatal("PerspectiveWarp returned nil for trapezoidal quad")
+	}
+	b := out.Bounds()
+	if b.Dx() != 60 || b.Dy() != 50 {
+		t.Errorf("expected 60×50, got %d×%d", b.Dx(), b.Dy())
+	}
+	// Centre pixel should come from inside the green region (G > 0).
+	mid := out.RGBAAt(30, 25)
+	if mid.G == 0 {
+		t.Errorf("centre pixel G=%d, expected non-zero (interior green pixel)", mid.G)
+	}
+}
+
+func TestBilinearSample_EdgePixel(t *testing.T) {
+	// 3×3 image; corner (2,2) has a distinct red value.
+	img := image.NewRGBA(image.Rect(0, 0, 3, 3))
+	img.SetRGBA(2, 2, color.RGBA{R: 200, A: 255})
+	// Sample very close to (2,2) but within bounds.
+	got := BilinearSample(img, 2.9, 2.9)
+	// Must not panic; R should be dominated by the corner value.
+	if got.R < 100 {
+		t.Errorf("edge pixel R=%d, want ≥100 (corner value dominates at x=2.9,y=2.9)", got.R)
+	}
+}
+
+func TestImageToNCHW_NormalizationValues(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.SetRGBA(0, 0, color.RGBA{R: 127, G: 0, B: 255, A: 255})
+	mean := [3]float64{0.5, 0.5, 0.5}
+	std := [3]float64{0.5, 0.5, 0.5}
+	data := ImageToNCHW(img, 1, 1, mean, std)
+	if len(data) != 3 {
+		t.Fatalf("expected 3 values, got %d", len(data))
+	}
+	// R: (127/255 - 0.5)/0.5 ≈ -0.004
+	if math.Abs(float64(data[0])-(-0.004)) > 0.01 {
+		t.Errorf("R: got %f, want ≈-0.004", data[0])
+	}
+	// G: (0/255 - 0.5)/0.5 = -1.0
+	if math.Abs(float64(data[1])-(-1.0)) > 0.01 {
+		t.Errorf("G: got %f, want ≈-1.0", data[1])
+	}
+	// B: (255/255 - 0.5)/0.5 = 1.0
+	if math.Abs(float64(data[2])-1.0) > 0.01 {
+		t.Errorf("B: got %f, want ≈1.0", data[2])
+	}
+}
+
 func TestPerspectiveWarp_InvalidDims(t *testing.T) {
 	src := image.NewRGBA(image.Rect(0, 0, 100, 100))
 	quad := [4][2]float64{{10, 10}, {90, 10}, {90, 90}, {10, 90}}

@@ -67,6 +67,65 @@ func TestClose_NoInit(t *testing.T) {
 	}
 }
 
+func TestClassifyPreprocess_WhitePixelNormalization(t *testing.T) {
+	cfg := NewModel().GetDefaultConfig().(*ModelConfig)
+	img := image.NewRGBA(image.Rect(0, 0, cfg.Width, cfg.Height))
+	for y := 0; y < cfg.Height; y++ {
+		for x := 0; x < cfg.Width; x++ {
+			img.SetRGBA(x, y, color.RGBA{R: 255, G: 255, B: 255, A: 255})
+		}
+	}
+	data := utils.ImageToNCHW(img, cfg.Height, cfg.Width, cfg.Mean, cfg.Std)
+	for i, v := range data {
+		if v < 0.99 || v > 1.01 {
+			t.Errorf("data[%d]=%f, want ≈1.0 (white pixel with mean/std=0.5)", i, v)
+			break
+		}
+	}
+}
+
+func TestClassifyPreprocess_BlackPixelNormalization(t *testing.T) {
+	cfg := NewModel().GetDefaultConfig().(*ModelConfig)
+	img := image.NewRGBA(image.Rect(0, 0, cfg.Width, cfg.Height))
+	for y := 0; y < cfg.Height; y++ {
+		for x := 0; x < cfg.Width; x++ {
+			img.SetRGBA(x, y, color.RGBA{R: 0, G: 0, B: 0, A: 255})
+		}
+	}
+	data := utils.ImageToNCHW(img, cfg.Height, cfg.Width, cfg.Mean, cfg.Std)
+	for i, v := range data {
+		if v > -0.99 || v < -1.01 {
+			t.Errorf("data[%d]=%f, want ≈-1.0 (black pixel with mean/std=0.5)", i, v)
+			break
+		}
+	}
+}
+
+func TestClassifyPreprocess_PortraitCrop(t *testing.T) {
+	cfg := NewModel().GetDefaultConfig().(*ModelConfig)
+	// Portrait image 30×200.
+	src := image.NewRGBA(image.Rect(0, 0, 30, 200))
+	for y := 0; y < 200; y++ {
+		for x := 0; x < 30; x++ {
+			src.SetRGBA(x, y, color.RGBA{R: 128, G: 128, B: 128, A: 255})
+		}
+	}
+	quad := utils.FloatQuad([4][2]int{{0, 0}, {29, 0}, {29, 199}, {0, 199}})
+	crop := utils.PerspectiveWarp(src, quad, cfg.Width, cfg.Height)
+	if crop == nil {
+		t.Fatal("PerspectiveWarp returned nil for portrait crop")
+	}
+	b := crop.Bounds()
+	if b.Dx() != cfg.Width || b.Dy() != cfg.Height {
+		t.Errorf("crop size=%d×%d, want %d×%d", b.Dx(), b.Dy(), cfg.Width, cfg.Height)
+	}
+	data := utils.ImageToNCHW(crop, cfg.Height, cfg.Width, cfg.Mean, cfg.Std)
+	want := 3 * cfg.Height * cfg.Width
+	if len(data) != want {
+		t.Errorf("ImageToNCHW length=%d, want %d", len(data), want)
+	}
+}
+
 func TestClassifyPreprocess_TensorSize(t *testing.T) {
 	cfg := NewModel().GetDefaultConfig().(*ModelConfig)
 	img := newTextImage(300, 60, "Hello World")
