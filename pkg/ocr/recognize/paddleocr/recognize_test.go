@@ -10,8 +10,14 @@ import (
 	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/math/fixed"
 
+	"github.com/multippt/gopaddleocr/pkg/ocr/common"
+	"github.com/multippt/gopaddleocr/pkg/ocr/testutil"
 	"github.com/multippt/gopaddleocr/pkg/ocr/utils"
 )
+
+type useDefault struct{}
+
+func (useDefault) GetConfig(string) common.ModelConfig { return nil }
 
 // newRecTextImage creates an RGBA image with white background and black ASCII text.
 func newRecTextImage(w, h int, text string) *image.RGBA {
@@ -154,4 +160,45 @@ func TestRecognizePreprocess_Vertical(t *testing.T) {
 	if rotated.Bounds().Dy() != cfg.Height {
 		t.Errorf("rotated height=%d want %d (former portrait width)", rotated.Bounds().Dy(), cfg.Height)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Integration tests — require ORT + model file
+// ---------------------------------------------------------------------------
+
+func TestRecognize_WhiteImage(t *testing.T) {
+	testutil.RequireORT(t)
+	m := NewModel()
+	testutil.RequireModel(t, m.GetDefaultConfig().GetOnnxConfig().GetModelPath())
+	if err := m.Init(useDefault{}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	defer m.Close()
+
+	// Plain white image — should produce empty or near-empty text without crashing.
+	img := newRecTextImage(300, 48, "")
+	quad := [4][2]int{{0, 0}, {299, 0}, {299, 47}, {0, 47}}
+	result, err := m.Recognize(img, quad)
+	if err != nil {
+		t.Fatalf("Recognize: %v", err)
+	}
+	t.Logf("Recognize result: %q score=%.4f", result.Text, result.Score)
+}
+
+func TestRecognize_TextImage(t *testing.T) {
+	testutil.RequireORT(t)
+	m := NewModel()
+	testutil.RequireModel(t, m.GetDefaultConfig().GetOnnxConfig().GetModelPath())
+	if err := m.Init(useDefault{}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	defer m.Close()
+
+	img := newRecTextImage(300, 48, "Hello")
+	quad := [4][2]int{{0, 0}, {299, 0}, {299, 47}, {0, 47}}
+	result, err := m.Recognize(img, quad)
+	if err != nil {
+		t.Fatalf("Recognize: %v", err)
+	}
+	t.Logf("Recognize result: %q score=%.4f", result.Text, result.Score)
 }

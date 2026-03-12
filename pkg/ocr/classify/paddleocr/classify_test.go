@@ -9,8 +9,16 @@ import (
 	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/math/fixed"
 
+	"github.com/multippt/gopaddleocr/pkg/ocr/common"
+	"github.com/multippt/gopaddleocr/pkg/ocr/testutil"
 	"github.com/multippt/gopaddleocr/pkg/ocr/utils"
 )
+
+// useDefault is a ConfigSource that returns nil, so OnnxModel.Init falls back
+// to the model's own GetDefaultConfig().
+type useDefault struct{}
+
+func (useDefault) GetConfig(string) common.ModelConfig { return nil }
 
 // newTextImage creates an RGBA image with white background and black ASCII text.
 func newTextImage(w, h int, text string) *image.RGBA {
@@ -123,6 +131,47 @@ func TestClassifyPreprocess_PortraitCrop(t *testing.T) {
 	want := 3 * cfg.Height * cfg.Width
 	if len(data) != want {
 		t.Errorf("ImageToNCHW length=%d, want %d", len(data), want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Integration tests — require ORT + model file
+// ---------------------------------------------------------------------------
+
+func TestClassify_UprightWhiteImage(t *testing.T) {
+	testutil.RequireORT(t)
+	m := NewModel()
+	testutil.RequireModel(t, m.GetDefaultConfig().GetOnnxConfig().GetModelPath())
+	if err := m.Init(useDefault{}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	defer m.Close()
+
+	// A plain white 300×60 image — the model should not panic and should
+	// return a definite answer (upright is expected for a featureless image).
+	img := newTextImage(300, 60, "")
+	quad := [4][2]int{{0, 0}, {299, 0}, {299, 59}, {0, 59}}
+	rotated, err := m.Classify(img, quad)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	t.Logf("Classify result: rotated=%v", rotated)
+}
+
+func TestClassify_TextImage(t *testing.T) {
+	testutil.RequireORT(t)
+	m := NewModel()
+	testutil.RequireModel(t, m.GetDefaultConfig().GetOnnxConfig().GetModelPath())
+	if err := m.Init(useDefault{}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	defer m.Close()
+
+	img := newTextImage(300, 60, "Hello World")
+	quad := [4][2]int{{0, 0}, {299, 0}, {299, 59}, {0, 59}}
+	_, err := m.Classify(img, quad)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
 	}
 }
 

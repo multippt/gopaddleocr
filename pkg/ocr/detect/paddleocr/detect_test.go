@@ -1,11 +1,18 @@
 package paddleocr
 
 import (
+	"image"
+	"image/color"
 	"math"
 	"testing"
 
 	"github.com/multippt/gopaddleocr/pkg/ocr/common"
+	"github.com/multippt/gopaddleocr/pkg/ocr/testutil"
 )
+
+type useDefault struct{}
+
+func (useDefault) GetConfig(string) common.ModelConfig { return nil }
 
 // testDetConfig is used by tests that need a ModelConfig without importing ocr (avoids cycle).
 // Values match the defaults previously in DefaultConfig.
@@ -439,6 +446,59 @@ func TestDetPostprocess_MultipleRegions(t *testing.T) {
 	boxes := m.postprocess(testDetConfig, prob, padH, padW, padH, padW, padH, padW)
 	if len(boxes) != 2 {
 		t.Errorf("expected 2 boxes for two separated bands, got %d", len(boxes))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Integration tests — require ORT + model file
+// ---------------------------------------------------------------------------
+
+func TestDetect_PlainWhiteImage(t *testing.T) {
+	testutil.RequireORT(t)
+	m := NewModel()
+	testutil.RequireModel(t, m.GetDefaultConfig().GetOnnxConfig().GetModelPath())
+	if err := m.Init(useDefault{}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	defer m.Close()
+
+	// Plain white image — expect no boxes (nothing to detect).
+	img := image.NewRGBA(image.Rect(0, 0, 320, 96))
+	for y := 0; y < 96; y++ {
+		for x := 0; x < 320; x++ {
+			img.SetRGBA(x, y, color.RGBA{R: 255, G: 255, B: 255, A: 255})
+		}
+	}
+	boxes, err := m.Detect(img)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	t.Logf("Detect returned %d boxes", len(boxes))
+}
+
+func TestDetect_DarkBandImage(t *testing.T) {
+	testutil.RequireORT(t)
+	m := NewModel()
+	testutil.RequireModel(t, m.GetDefaultConfig().GetOnnxConfig().GetModelPath())
+	if err := m.Init(useDefault{}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	defer m.Close()
+
+	// White background with a black horizontal band — text-like region.
+	img := image.NewRGBA(image.Rect(0, 0, 320, 96))
+	for y := 0; y < 96; y++ {
+		for x := 0; x < 320; x++ {
+			c := color.RGBA{R: 255, G: 255, B: 255, A: 255}
+			if y >= 35 && y <= 60 {
+				c = color.RGBA{R: 0, G: 0, B: 0, A: 255}
+			}
+			img.SetRGBA(x, y, c)
+		}
+	}
+	_, err := m.Detect(img)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
 	}
 }
 

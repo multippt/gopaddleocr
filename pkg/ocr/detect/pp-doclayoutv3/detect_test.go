@@ -2,9 +2,17 @@ package ppdoclayoutv3
 
 import (
 	"image"
+	"image/color"
 	"math"
 	"testing"
+
+	"github.com/multippt/gopaddleocr/pkg/ocr/common"
+	"github.com/multippt/gopaddleocr/pkg/ocr/testutil"
 )
+
+type useDefault struct{}
+
+func (useDefault) GetConfig(string) common.ModelConfig { return nil }
 
 var testCfg = &ModelConfig{InputSize: 800, ScoreThreshold: 0.3}
 
@@ -179,6 +187,32 @@ func TestPostprocess_CoordClamping(t *testing.T) {
 			t.Errorf("corner %d y=%d out of [0,99]", i, corner[1])
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Integration tests — require ORT + model file
+// ---------------------------------------------------------------------------
+
+func TestDocLayout_PlainWhiteImage(t *testing.T) {
+	testutil.RequireORT(t)
+	m := NewModel()
+	testutil.RequireModel(t, m.GetDefaultConfig().GetOnnxConfig().GetModelPath())
+	if err := m.Init(useDefault{}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	defer m.Close()
+
+	img := image.NewRGBA(image.Rect(0, 0, 400, 300))
+	for y := 0; y < 300; y++ {
+		for x := 0; x < 400; x++ {
+			img.SetRGBA(x, y, color.RGBA{R: 255, G: 255, B: 255, A: 255})
+		}
+	}
+	boxes, err := m.Detect(img)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	t.Logf("DocLayout returned %d boxes", len(boxes))
 }
 
 func TestPostprocess_MultiBox(t *testing.T) {
