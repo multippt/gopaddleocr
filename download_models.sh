@@ -6,14 +6,14 @@ mkdir -p models
 FILES=(
   "ch_PP-OCRv5_rec_server_infer.onnx"
   "ch_PP-OCRv5_server_det.onnx"
-  "ch_ppocr_mobile_v2.0_cls_infer.onnx"
+  "PP-LCNet_x1_0_textline_ori_infer.onnx"
   "PP-DocLayoutV3.onnx"
 )
 
 URLS=(
   "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/master/onnx/PP-OCRv5/rec/ch_PP-OCRv5_rec_server_infer.onnx"
   "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/master/onnx/PP-OCRv5/det/ch_PP-OCRv5_server_det.onnx"
-  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/master/onnx/PP-OCRv4/cls/ch_ppocr_mobile_v2.0_cls_infer.onnx"
+  "https://huggingface.co/marsena/paddleocr-onnx-models/resolve/main/PP-LCNet_x1_0_textline_ori_infer.onnx"
   "https://huggingface.co/alex-dinh/PP-DocLayoutV3-ONNX/resolve/main/PP-DocLayoutV3.onnx"
 )
 

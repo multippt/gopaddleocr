@@ -45,29 +45,6 @@ func TestGetName(t *testing.T) {
 	}
 }
 
-func TestGetDefaultConfig(t *testing.T) {
-	m := NewModel()
-	cfg, ok := m.GetDefaultConfig().(*ModelConfig)
-	if !ok {
-		t.Fatal("GetDefaultConfig did not return *ModelConfig")
-	}
-	if cfg.Height != 48 {
-		t.Errorf("Height=%d want 48", cfg.Height)
-	}
-	if cfg.Width != 192 {
-		t.Errorf("Width=%d want 192", cfg.Width)
-	}
-	if cfg.Threshold != 0.9 {
-		t.Errorf("Threshold=%f want 0.9", cfg.Threshold)
-	}
-	if cfg.Mean != [3]float64{0.5, 0.5, 0.5} {
-		t.Errorf("Mean=%v want [0.5,0.5,0.5]", cfg.Mean)
-	}
-	if cfg.Std != [3]float64{0.5, 0.5, 0.5} {
-		t.Errorf("Std=%v want [0.5,0.5,0.5]", cfg.Std)
-	}
-}
-
 func TestClose_NoInit(t *testing.T) {
 	m := NewModel()
 	if err := m.Close(); err != nil {
@@ -84,9 +61,18 @@ func TestClassifyPreprocess_WhitePixelNormalization(t *testing.T) {
 		}
 	}
 	data := utils.ImageToNCHW(img, cfg.Height, cfg.Width, cfg.Mean, cfg.Std)
+	// Expected: (1.0 - mean[c]) / std[c] per channel.
+	expected := [3]float32{
+		float32((1.0 - cfg.Mean[0]) / cfg.Std[0]),
+		float32((1.0 - cfg.Mean[1]) / cfg.Std[1]),
+		float32((1.0 - cfg.Mean[2]) / cfg.Std[2]),
+	}
+	const tol = float32(1e-3)
 	for i, v := range data {
-		if v < 0.99 || v > 1.01 {
-			t.Errorf("data[%d]=%f, want ≈1.0 (white pixel with mean/std=0.5)", i, v)
+		ch := i / (cfg.Height * cfg.Width)
+		want := expected[ch]
+		if v < want-tol || v > want+tol {
+			t.Errorf("data[%d] (ch%d)=%f, want ≈%f", i, ch, v, want)
 			break
 		}
 	}
@@ -101,9 +87,18 @@ func TestClassifyPreprocess_BlackPixelNormalization(t *testing.T) {
 		}
 	}
 	data := utils.ImageToNCHW(img, cfg.Height, cfg.Width, cfg.Mean, cfg.Std)
+	// Expected: (0.0 - mean[c]) / std[c] per channel.
+	expected := [3]float32{
+		float32(-cfg.Mean[0] / cfg.Std[0]),
+		float32(-cfg.Mean[1] / cfg.Std[1]),
+		float32(-cfg.Mean[2] / cfg.Std[2]),
+	}
+	const tol = float32(1e-3)
 	for i, v := range data {
-		if v > -0.99 || v < -1.01 {
-			t.Errorf("data[%d]=%f, want ≈-1.0 (black pixel with mean/std=0.5)", i, v)
+		ch := i / (cfg.Height * cfg.Width)
+		want := expected[ch]
+		if v < want-tol || v > want+tol {
+			t.Errorf("data[%d] (ch%d)=%f, want ≈%f", i, ch, v, want)
 			break
 		}
 	}

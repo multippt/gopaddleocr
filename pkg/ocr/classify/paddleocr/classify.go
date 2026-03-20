@@ -39,14 +39,14 @@ func (m *Model) GetName() string { return ModelName }
 
 func (m *Model) GetDefaultConfig() common.ModelConfig {
 	return &ModelConfig{
-		Height:    48,
-		Width:     192,
+		Height:    80,
+		Width:     160,
 		Threshold: 0.9,
-		Mean:      [3]float64{0.5, 0.5, 0.5},
-		Std:       [3]float64{0.5, 0.5, 0.5},
+		Mean:      [3]float64{0.485, 0.456, 0.406},
+		Std:       [3]float64{0.229, 0.224, 0.225},
 		BaseModelConfig: common.BaseModelConfig{
 			OnnxConfig: common.Config{
-				ModelPath: "ch_ppocr_mobile_v2.0_cls_infer.onnx",
+				ModelPath: "PP-LCNet_x1_0_textline_ori_infer.onnx",
 			},
 		},
 	}
