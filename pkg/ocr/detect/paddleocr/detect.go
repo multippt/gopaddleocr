@@ -51,7 +51,7 @@ func (m *Model) GetDefaultConfig() common.ModelConfig {
 		MinArea:         16,
 		BaseModelConfig: common.BaseModelConfig{
 			OnnxConfig: common.Config{
-				ModelPath: "ch_PP-OCRv5_server_det.onnx",
+				ModelPath: "PP-OCRv5_server_det.onnx",
 			},
 		},
 	}

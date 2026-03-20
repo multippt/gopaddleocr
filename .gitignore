@@ -35,3 +35,7 @@ go.work.sum
 # Models and dependencies
 models
 onnxruntime
+
+# Python
+.cache
+.venv

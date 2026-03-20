@@ -51,7 +51,7 @@ func (m *Model) GetDefaultConfig() common.ModelConfig {
 		Std:    [3]float64{0.5, 0.5, 0.5},
 		BaseModelConfig: common.BaseModelConfig{
 			OnnxConfig: common.Config{
-				ModelPath: "ch_PP-OCRv5_rec_server_infer.onnx",
+				ModelPath: "PP-OCRv5_server_rec.onnx",
 			},
 		},
 	}
